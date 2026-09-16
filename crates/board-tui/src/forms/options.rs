@@ -213,7 +213,17 @@ impl Form {
         if !self.is_card_form() {
             return;
         }
-        let values = self.card_values();
+        let mut values = self.card_values();
+        // For a new card, if the current harness (default `pi`) is not in
+        // the filtered installed list, fall back to the filtered default
+        // (`pi` if installed else first installed). Edits preserve the
+        // card's existing harness even when that harness is not installed.
+        if matches!(self.kind, FormKind::CardCreate { .. })
+            && !self.harnesses.contains(&values.harness)
+        {
+            values.harness =
+                board_core::capability::default_harness_for(&self.harnesses);
+        }
         self.fields = build_card_fields(
             &values,
             self.caps.as_ref(),

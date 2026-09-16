@@ -398,3 +398,67 @@ fn default_capabilities_match_builtins_and_fail_closed_for_unknown() {
         resume_support_for("mystery", &Config::default())
     );
 }
+
+#[test]
+fn filtered_harnesses_show_only_installed_builtins() {
+    use board_core::capability::filtered_available_harnesses;
+    let cfg = Config::default();
+    // Herdr reports only pi and codex as available → only those builtins survive.
+    let installed = vec!["pi".to_string(), "codex".to_string()];
+    assert_eq!(
+        filtered_available_harnesses(&cfg, Some(&installed)),
+        vec!["pi", "codex"]
+    );
+    // Antigravity is discovered via the `antigravity_cli` target.
+    let agy = vec!["antigravity_cli".to_string()];
+    assert_eq!(
+        filtered_available_harnesses(&cfg, Some(&agy)),
+        vec!["antigravity"]
+    );
+    // No Herdr reachability → graceful fallback to all builtins.
+    assert_eq!(
+        filtered_available_harnesses(&cfg, None),
+        vec!["pi", "claude", "codex", "opencode", "antigravity"]
+    );
+    // Config-defined harnesses are always appended, sorted, and never filtered by Herdr.
+    let toml = "[harness.zeta]\nargv = [\"z\"]\n[harness.alpha]\nargv = [\"a\"]\n";
+    let cfg2 = Config::from_toml(toml).unwrap();
+    assert_eq!(
+        filtered_available_harnesses(&cfg2, Some(&installed)),
+        vec!["pi", "codex", "alpha", "zeta"]
+    );
+    assert_eq!(
+        filtered_available_harnesses(&cfg2, None),
+        vec![
+            "pi",
+            "claude",
+            "codex",
+            "opencode",
+            "antigravity",
+            "alpha",
+            "zeta"
+        ]
+    );
+}
+
+#[test]
+fn default_harness_picks_pi_or_first_installed() {
+    use board_core::capability::default_harness_for;
+    // pi present → pi is the default even though other harnesses exist.
+    assert_eq!(
+        default_harness_for(&vec!["pi".to_string(), "codex".to_string()]),
+        "pi"
+    );
+    // pi absent → first installed in canonical order.
+    assert_eq!(
+        default_harness_for(&vec!["codex".to_string(), "opencode".to_string()]),
+        "codex"
+    );
+    // Empty list (no builtin installed and no config) → last-resort pi.
+    assert_eq!(default_harness_for(&[]), "pi");
+    // Config-only list → first config harness.
+    assert_eq!(
+        default_harness_for(&vec!["alpha".to_string(), "zeta".to_string()]),
+        "alpha"
+    );
+}
