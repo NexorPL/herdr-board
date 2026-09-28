@@ -11,16 +11,35 @@ exec > >(tee "$EXPORT_DIR/runner.log") 2>&1
 
 HERDR_VERSION=0.9.0
 HERDR_PROTOCOL=22
-HERDR_URL=https://github.com/herdrdev/herdr/releases/download/v0.9.0/herdr-linux-x86_64
-HERDR_SHA256=4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f
-CACHE_DIR="${HERDR_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/herdr-board/herdr-$HERDR_VERSION-linux-x86_64}"
-HERDR_BIN="$CACHE_DIR/herdr"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # Git Bash on Windows: the release ships a zip; its SHA pins the archive,
+    # and a marker written after a verified extract pins the cached herdr.exe.
+    HERDR_PLATFORM=windows-x86_64
+    HERDR_URL=https://github.com/herdrdev/herdr/releases/download/v0.9.0/herdr-windows-x86_64.zip
+    HERDR_SHA256=b4508c445de1c1a68c760a01735da2aba2fa214b2aafd4b07f732e49b2a64b11
+    HERDR_EXE=herdr.exe
+    ;;
+  *)
+    HERDR_PLATFORM=linux-x86_64
+    HERDR_URL=https://github.com/herdrdev/herdr/releases/download/v0.9.0/herdr-linux-x86_64
+    HERDR_SHA256=4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f
+    HERDR_EXE=herdr
+    ;;
+esac
+CACHE_DIR="${HERDR_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/herdr-board/herdr-$HERDR_VERSION-$HERDR_PLATFORM}"
+HERDR_BIN="$CACHE_DIR/$HERDR_EXE"
+HERDR_ZIP_MARKER="$CACHE_DIR/.verified-zip.sha256"
 mkdir -p "$CACHE_DIR"
 chmod 700 "$CACHE_DIR"
 
 sha_matches() {
-  [ -f "$1" ] && [ ! -L "$1" ] &&
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  if [ "$HERDR_EXE" = herdr.exe ]; then
+    [ -f "$HERDR_ZIP_MARKER" ] && [ "$(cat "$HERDR_ZIP_MARKER")" = "$HERDR_SHA256" ]
+  else
     printf '%s  %s\n' "$HERDR_SHA256" "$1" | sha256sum --check --status
+  fi
 }
 
 if [ ! -x "$HERDR_BIN" ] || ! sha_matches "$HERDR_BIN"; then
@@ -31,8 +50,16 @@ if [ ! -x "$HERDR_BIN" ] || ! sha_matches "$HERDR_BIN"; then
     --connect-timeout 15 --max-time 120 --retry 3 --retry-all-errors \
     --output "$tmp" "$HERDR_URL"
   printf '%s  %s\n' "$HERDR_SHA256" "$tmp" | sha256sum --check
-  chmod 755 "$tmp"
-  mv -f "$tmp" "$HERDR_BIN"
+  if [ "$HERDR_EXE" = herdr.exe ]; then
+    rm -f "$HERDR_ZIP_MARKER" "$HERDR_BIN"
+    python3 -m zipfile -e "$(cygpath -w "$tmp")" "$(cygpath -w "$CACHE_DIR")"
+    [ -f "$HERDR_BIN" ] || { echo "herdr.exe missing from the pinned zip" >&2; exit 1; }
+    printf '%s' "$HERDR_SHA256" >"$HERDR_ZIP_MARKER"
+    rm -f "$tmp"
+  else
+    chmod 755 "$tmp"
+    mv -f "$tmp" "$HERDR_BIN"
+  fi
   trap - EXIT
 else
   echo "Using SHA-verified cached Herdr $HERDR_VERSION"
@@ -65,7 +92,14 @@ mapfile -t artifact_roots < <(
 export_status=0
 if [ "${#artifact_roots[@]}" -eq 1 ]; then
   artifact_root="${artifact_roots[0]}"
-  if python3 - "$artifact_root" <<'PY'
+  # Native Windows Python sees Git Bash's /tmp only through its Windows path.
+  native_root="$artifact_root"
+  native_tmp=/tmp
+  if [ "$HERDR_EXE" = herdr.exe ]; then
+    native_root="$(cygpath -w "$artifact_root")"
+    native_tmp="$(cygpath -w /tmp)"
+  fi
+  if python3 - "$native_root" "$native_tmp" <<'PY'
 import os
 import stat
 import sys
@@ -76,8 +110,9 @@ st = root.lstat()
 valid = (
     stat.S_ISDIR(st.st_mode)
     and not root.is_symlink()
-    and stat.S_IMODE(st.st_mode) == 0o700
-    and root.parent.resolve() == Path("/tmp")
+    # NTFS has no POSIX mode bits; the runner profile ACL is owner-only.
+    and (os.name == "nt" or stat.S_IMODE(st.st_mode) == 0o700)
+    and root.parent.resolve() == Path(sys.argv[2]).resolve()
     and root.name.startswith("hb-e2e-run.")
     and len(root.name.removeprefix("hb-e2e-run.")) == 6
 )

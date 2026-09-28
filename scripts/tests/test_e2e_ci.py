@@ -15,6 +15,11 @@ HERDR_URL = (
     "https://github.com/herdrdev/herdr/releases/download/"
     f"v{HERDR_VERSION}/herdr-linux-x86_64"
 )
+HERDR_WINDOWS_SHA256 = "b4508c445de1c1a68c760a01735da2aba2fa214b2aafd4b07f732e49b2a64b11"
+HERDR_WINDOWS_URL = (
+    "https://github.com/herdrdev/herdr/releases/download/"
+    f"v{HERDR_VERSION}/herdr-windows-x86_64.zip"
+)
 
 
 class LiveE2ECIContractTests(unittest.TestCase):
@@ -95,6 +100,26 @@ class LiveE2ECIContractTests(unittest.TestCase):
             "3dc83288073e4c2d3c679a30e7be97bcca9141c6fd17dbbb9219142e95c59253",
             self.wrapper,
         )
+
+    def test_wrapper_pins_the_windows_herdr_zip(self) -> None:
+        self.assertIn(HERDR_WINDOWS_URL, self.wrapper)
+        self.assertIn(HERDR_WINDOWS_SHA256, self.wrapper)
+        self.assertIn("MINGW*", self.wrapper)
+
+    def test_windows_live_job_runs_the_same_wrappers_on_windows(self) -> None:
+        self.assertIn("  live-e2e-windows:", self.workflow)
+        job = self.workflow.split("  live-e2e-windows:", 1)[1].split("\n  live-e2e:", 1)[0]
+        self.assertIn("runs-on: windows-latest", job)
+        self.assertIn("needs: [windows, e2e-safety]", job)
+        self.assertRegex(job, r"timeout-minutes:\s*[1-9][0-9]*")
+        self.assertIn("persist-credentials: false", job)
+        self.assertIn("shell: bash", job)
+        self.assertEqual(
+            re.findall(r"^\s*run:\s*(.+)$", job, re.M),
+            ["bash e2e/test-harness.sh", "bash e2e/ci.sh"],
+        )
+        self.assertIn(HERDR_WINDOWS_SHA256, job)
+        self.assertIn("if: always()", job)
 
     def test_plugin_manifest_pins_exact_minimum_herdr_version(self) -> None:
         manifest = (ROOT / "herdr-plugin.toml").read_text(encoding="utf-8")
