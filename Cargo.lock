@@ -145,6 +145,7 @@ dependencies = [
 name = "board-herdr"
 version = "0.18.0"
 dependencies = [
+ "board-ipc",
  "libc",
  "serde",
  "serde_json",
