@@ -4,6 +4,20 @@ use std::path::PathBuf;
 
 use directories::BaseDirs;
 
+/// `canonicalize`, minus Windows' `\\?\` verbatim prefix on drive paths, so a
+/// canonical path stays the plain `C:\…` users type and read. UNC and other
+/// verbatim forms are returned as `canonicalize` gave them.
+pub fn canonical(path: &std::path::Path) -> std::io::Result<PathBuf> {
+    let canonical = path.canonicalize()?;
+    #[cfg(windows)]
+    if let Some(plain) = canonical.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        if plain.as_bytes().get(1) == Some(&b':') {
+            return Ok(PathBuf::from(plain));
+        }
+    }
+    Ok(canonical)
+}
+
 /// XDG data dir: `<data>/herdr-board` (e.g. `~/.local/share/herdr-board`).
 pub fn data_dir() -> PathBuf {
     match BaseDirs::new() {

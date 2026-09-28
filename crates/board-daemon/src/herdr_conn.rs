@@ -82,7 +82,7 @@ mod tests {
     }
 
     /// Windows: the endpoint is a named pipe (no file), and the result must stay
-    /// a plain absolute path — a `\?\` verbatim prefix would change the pipe name.
+    /// a plain absolute path — a `\\?\` verbatim prefix would change the pipe name.
     #[cfg(windows)]
     #[test]
     fn normalize_socket_accepts_a_live_pipe_and_keeps_a_plain_path() {
@@ -92,6 +92,6 @@ mod tests {
         let spelled = dir.path().join(".").join("herdr.sock");
         let normalized = normalize_socket(&spelled, "origin").unwrap();
         assert_eq!(normalized, socket);
-        assert!(!normalized.to_string_lossy().starts_with(r"\?\"));
+        assert!(!normalized.to_string_lossy().starts_with(r"\\?\"));
     }
 }
