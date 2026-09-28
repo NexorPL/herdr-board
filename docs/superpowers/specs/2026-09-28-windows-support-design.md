@@ -99,6 +99,14 @@ No board or Herdr semantics. Exposes:
   like `O_NOFOLLOW`.
 - **`paths::session_name_from_socket`** accepts both `/` and `\` separators
   (`…\sessions\<name>\herdr.sock`).
+- **Owner-only file opens** are centralized in `board_core::paths::open_private_file`
+  (Unix: `mode(0o600)` + `O_NOFOLLOW` + `set_permissions`; Windows: reparse-point check), used by
+  the daemon's daily log and the CLI's `bootstrap.log`.
+- **Program resolution** (added during planning): `std::process::Command::new("pi")` on Windows
+  only finds `pi.exe`, while npm-installed CLIs (`pi`, `opencode`, `agy`, `code`) are `.cmd`
+  shims. `board_core::process::command(program)` resolves a bare name through `PATH` × `PATHEXT`
+  on Windows (identity on Unix) and is used for the provider catalogs, the local spawner, the TUI
+  editor, and the configured runner's `pwsh` lookup. Default `$EDITOR` on Windows is `notepad`.
 - **Managed agents** (`agent.start` + `pane_id`): no board change; manual verification that
   Windows Herdr starts npm `.cmd` shims (e.g. `claude.cmd`), result recorded in `docs/herdr.md`.
 
