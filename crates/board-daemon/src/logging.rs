@@ -396,6 +396,16 @@ mod tests {
     }
 
     #[test]
+    fn daily_file_opens_on_every_platform() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs = dir.path().join("logs");
+        assert!(matches!(
+            super::DailyFile::open(&logs).unwrap(),
+            super::DailyFile::File(_)
+        ));
+    }
+
+    #[test]
     fn exact_thirty_day_boundary_is_retained() {
         let dir = tempfile::tempdir().unwrap();
         let now = super::days_from_civil(2026, 8, 31) * super::SECONDS_PER_DAY;
