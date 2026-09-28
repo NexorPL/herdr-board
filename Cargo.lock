@@ -155,6 +155,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "board-ipc"
+version = "0.18.0"
+dependencies = [
+ "tempfile",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "board-tui"
 version = "0.18.0"
 dependencies = [
