@@ -146,6 +146,31 @@ jobs:
       - name: Rust tests
         run: cargo test --workspace --all-features
 
+  # Native Windows: named-pipe transport, detached auto-start, PowerShell
+  # launch scripts. Same commands as the Linux clippy/test gates, so the
+  # documented gate list stays one list.
+  windows:
+    name: windows
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --workspace --all-features
+
   live-e2e:
     name: live-e2e
     needs: [fmt, clippy, docs, scripts, e2e-safety, test]
