@@ -201,6 +201,40 @@ class WindowsSnapshotTest(unittest.TestCase):
             child.wait()
         self.assertFalse(identity.process_exists(child.pid))
 
+    def test_direct_child_accepts_only_self_or_an_msys_bash_stub_parent(self) -> None:
+        me = str(os.getpid())
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            snap = inspect(child.pid)
+            self.assertTrue(identity.is_direct_child(snap, me))
+            self.assertFalse(identity.is_direct_child(snap, "4"))  # System
+            # A python.exe grandchild through a python.exe parent is not an MSYS
+            # fork stub, so it must not count as a direct child of this process.
+            grand = subprocess.Popen(
+                [sys.executable, "-c",
+                 "import subprocess,sys,time; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); print(p.pid, flush=True); time.sleep(30)"],
+                stdout=subprocess.PIPE, text=True,
+            )
+            try:
+                grandchild = int(grand.stdout.readline())
+                self.assertFalse(identity.is_direct_child(inspect(grandchild), me))
+            finally:
+                grand.kill()
+                grand.wait()
+                subprocess.run(["taskkill", "/F", "/PID", str(grandchild)], capture_output=True)
+        finally:
+            child.kill()
+            child.wait()
+
+    def test_private_mode_holds_only_inside_the_user_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:  # under %TEMP%, in the profile
+            file = Path(directory) / "marker"
+            file.write_text("x", encoding="utf-8")
+            self.assertEqual(identity.private_mode(directory), "700")
+            self.assertEqual(identity.private_mode(str(file)), "600")
+        outside = os.environ.get("SystemRoot", r"C:\Windows")
+        self.assertNotIn(identity.private_mode(outside), {"600", "700"})
+
     def test_process_exists_never_terminates_the_process(self) -> None:
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
         try:

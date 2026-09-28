@@ -53,6 +53,23 @@ fail() { printf 'E2E FAIL: %s\n' "$*" >&2; exit 1; }
 # treats exit code 3 as SKIP.
 skip() { printf 'SKIP: %s\n' "$*" >&2; exit 3; }
 
+# --- platform ---------------------------------------------------------------
+# Git Bash on Windows runs the same suite against a native Windows Herdr. Its
+# `python3` is often only the Microsoft Store stub, so the harness binds the
+# name to the real interpreter; every helper below calls `python3`.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) E2E_WINDOWS=1 ;;
+  *) E2E_WINDOWS=0 ;;
+esac
+if [ "$E2E_WINDOWS" = 1 ] && ! python3 -c '' >/dev/null 2>&1; then
+  E2E_PYTHON="${E2E_PYTHON:-$(type -P python 2>/dev/null || true)}"
+  "${E2E_PYTHON:-false}" -c '' >/dev/null 2>&1 \
+    || { printf 'E2E FAIL: %s\n' "no working python3/python on PATH" >&2; exit 1; }
+  python3() { "$E2E_PYTHON" "$@"; }
+  export E2E_PYTHON
+  export -f python3
+fi
+
 # --- paths & tools ----------------------------------------------------------
 E2E_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$E2E_LIB_DIR/.." && pwd)"
@@ -74,13 +91,33 @@ e2e_identity_key_ensure() {
 
 e2e_identity_python() {
   [ -n "$E2E_LOCAL_IDENTITY_KEY" ] || return 1
-  python3 "$E2E_PROCESS_IDENTITY" "$@" 3<<<"$E2E_LOCAL_IDENTITY_KEY"
+  if [ "$E2E_WINDOWS" = 1 ]; then
+    # A native Windows process inherits no fd 3; stdin carries the key instead.
+    python3 "$E2E_PROCESS_IDENTITY" "$@" <<<"$E2E_LOCAL_IDENTITY_KEY"
+  else
+    python3 "$E2E_PROCESS_IDENTITY" "$@" 3<<<"$E2E_LOCAL_IDENTITY_KEY"
+  fi
+}
+
+# e2e_os_pid <pid> — the OS PID for a PID bash reports (`$!`). Git Bash hands
+# out MSYS PIDs; the identity layer inspects native Windows processes.
+e2e_os_pid() {
+  if [ "$E2E_WINDOWS" = 1 ] && [ -r "/proc/$1/winpid" ]; then
+    cat "/proc/$1/winpid"
+  else
+    printf '%s\n' "$1"
+  fi
 }
 
 e2e_stat_mode() { python3 "$E2E_PROCESS_IDENTITY" mode "$1"; }
-e2e_realpath() { python3 "$E2E_PROCESS_IDENTITY" realpath "$1"; }
-e2e_process_exists() { python3 "$E2E_PROCESS_IDENTITY" exists "$1"; }
-e2e_process_state() { python3 "$E2E_PROCESS_IDENTITY" state "$1"; }
+e2e_realpath() {
+  local resolved
+  resolved="$(python3 "$E2E_PROCESS_IDENTITY" realpath "$1")" || return
+  # Keep the shell's own spelling so comparisons with bash paths hold.
+  if [ "$E2E_WINDOWS" = 1 ]; then cygpath -u "$resolved"; else printf '%s\n' "$resolved"; fi
+}
+e2e_process_exists() { python3 "$E2E_PROCESS_IDENTITY" exists "$(e2e_os_pid "$1")"; }
+e2e_process_state() { python3 "$E2E_PROCESS_IDENTITY" state "$(e2e_os_pid "$1")"; }
 e2e_identity_sign_json() { e2e_identity_python sign "$1"; }
 e2e_identity_token_validate() { e2e_identity_python validate "$1"; }
 
@@ -823,18 +860,19 @@ e2e_process_identity_capture() {
   local pid="$1" session="$2" name="$3" expected_command="${4:-}" owner_token="${5:-}" \
     owner_env="${6:-E2E_HERDR_OWNER_TOKEN}" provisional="${7:-}"
   [ -n "$provisional" ] || return 1
-  e2e_identity_python stable-capture "$pid" "$session" "$name" "$expected_command" \
+  e2e_identity_python stable-capture "$(e2e_os_pid "$pid")" "$session" "$name" "$expected_command" \
     "$owner_token" "$owner_env" "$provisional"
 }
 
 e2e_process_identity_verify() {
   local pid="$1" token="$2"
-  [ -n "$token" ] && e2e_identity_python verify "$pid" "$token"
+  [ -n "$token" ] && e2e_identity_python verify "$(e2e_os_pid "$pid")" "$token"
 }
 
 e2e_provisional_child_capture() {
   local pid="$1" owner_token="$2" owner_env="${3:-E2E_HERDR_OWNER_TOKEN}"
-  e2e_identity_python provisional-capture "$pid" "$owner_token" "$$" "$owner_env"
+  e2e_identity_python provisional-capture "$(e2e_os_pid "$pid")" "$owner_token" \
+    "$(e2e_os_pid "$$")" "$owner_env"
 }
 
 # Verify the stable spawn capability across the one permitted identity change:
@@ -843,7 +881,7 @@ e2e_provisional_child_capture() {
 e2e_provisional_child_transition_verify() {
   local pid="$1" token="$2" expected_command="${3:-}" name="${4:-}" \
     transition="${5:-session}" owner_env="${6:-E2E_HERDR_OWNER_TOKEN}"
-  e2e_identity_python transition-verify "$pid" "$token" "$$" "$expected_command" \
+  e2e_identity_python transition-verify "$(e2e_os_pid "$pid")" "$token" "$(e2e_os_pid "$$")" "$expected_command" \
     "$name" "$transition" "$owner_env"
 }
 

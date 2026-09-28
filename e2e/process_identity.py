@@ -65,8 +65,13 @@ def _canonical(value: dict[str, Any]) -> bytes:
 
 def _read_key() -> bytes:
     try:
-        with os.fdopen(3, "rb", closefd=True) as stream:
-            key = stream.read().rstrip(b"\n")
+        if PLATFORM == "windows":
+            # A native Windows process inherits no fd 3 from Git Bash; lib.sh
+            # hands the key over stdin instead (no identity command reads it).
+            key = sys.stdin.buffer.read().rstrip(b"\n")
+        else:
+            with os.fdopen(3, "rb", closefd=True) as stream:
+                key = stream.read().rstrip(b"\n")
     except OSError as exc:
         raise IdentityError("identity signing key unavailable") from exc
     if len(key) < 32:
@@ -494,11 +499,35 @@ def _unsigned(
     }
 
 
+_MSYS_STUBS = {"bash.exe", "sh.exe"}
+
+
+def is_direct_child(current: Snapshot, parent_pid: str) -> bool:
+    """Whether `current` was spawned by `parent_pid`.
+
+    Git Bash runs a native program through a forked MSYS stub (bash.exe/sh.exe)
+    that the native process sees as its parent; that exact one-hop stub, itself
+    a child of `parent_pid`, counts as the same spawn. Nothing else does.
+    """
+    if current.parent_pid == parent_pid:
+        return True
+    if PLATFORM != "windows":
+        return False
+    try:
+        stub = snapshot(int(current.parent_pid))
+    except (IdentityError, ValueError):
+        return False
+    return (
+        os.path.basename(stub.exe).lower() in _MSYS_STUBS
+        and stub.parent_pid == parent_pid
+    )
+
+
 def provisional_capture(
     pid: int, owner_token: str, parent_pid: str, owner_env: str, key: bytes
 ) -> dict[str, Any]:
     current = snapshot(pid)
-    if current.parent_pid != parent_pid or not current.cmdline:
+    if not is_direct_child(current, parent_pid) or not current.cmdline:
         raise IdentityError("process is not the exact direct child")
     if not _owner_present(current, owner_env, owner_token):
         raise IdentityError("process owner evidence mismatch")
@@ -609,7 +638,7 @@ def provisional_transition_verify(
         if (
             current.pid != recorded["pid"]
             or current.start_time != recorded["start_time"]
-            or current.parent_pid != parent_pid
+            or not is_direct_child(current, parent_pid)
             or current.parent_pid != recorded["parent_pid"]
             or not _owner_present(current, owner_env, recorded["owner_token"])
         ):
@@ -643,13 +672,33 @@ def _emit(value: object) -> None:
     print(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True))
 
 
+def private_mode(path: str) -> str:
+    """POSIX permission bits as the harness checks them (`600`/`700`).
+
+    NTFS has no mode bits: `os.stat` reports 666/777 for everything. A path
+    inside the invoking user's profile inherits its owner/SYSTEM/Administrators
+    ACL — the Windows equivalent of owner-only — so it reports 600 (file) or 700
+    (directory). Anything else, and any symlink, reports its raw bits and fails
+    the harness's owner-only checks closed.
+    """
+    st = os.lstat(path)
+    raw = f"{stat.S_IMODE(st.st_mode):o}"
+    if PLATFORM != "windows" or stat.S_ISLNK(st.st_mode):
+        return raw
+    profile = os.path.realpath(os.path.expanduser("~"))
+    resolved = os.path.realpath(path)
+    if os.path.commonpath([os.path.normcase(profile), os.path.normcase(resolved)]) != os.path.normcase(profile):
+        return raw
+    return "700" if stat.S_ISDIR(st.st_mode) else "600"
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         return 2
     command = sys.argv[1]
     try:
         if command == "mode":
-            print(f"{stat.S_IMODE(os.stat(sys.argv[2]).st_mode):o}")
+            print(private_mode(sys.argv[2]) if PLATFORM == "windows" else f"{stat.S_IMODE(os.stat(sys.argv[2]).st_mode):o}")
             return 0
         if command == "realpath":
             print(os.path.realpath(sys.argv[2]))
