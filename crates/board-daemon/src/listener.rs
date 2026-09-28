@@ -1,5 +1,5 @@
 //! The boardd accept surface: a tokio Unix socket, or a Windows named pipe
-//! (`\.\pipe\` + socket path) rotated one instance per client.
+//! (`\\.\pipe\` + socket path) rotated one instance per client.
 
 use std::io;
 #[cfg(any(windows, test))]

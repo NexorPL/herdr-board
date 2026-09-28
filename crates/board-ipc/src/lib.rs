@@ -1,6 +1,6 @@
 //! Platform local-IPC transport: AF_UNIX streams on Unix, named pipes on Windows.
 //!
-//! Herdr on Windows serves its API on `\.\pipe\` + the socket path, and boardd
+//! Herdr on Windows serves its API on `\\.\pipe\` + the socket path, and boardd
 //! follows the same convention, so `BOARD_SOCKET` / `HERDR_SOCKET_PATH` stay plain
 //! paths on every platform. It also owns the one Windows process primitive the
 //! workspace needs (`spawn_detached`), so all Win32 `unsafe` lives here. This
