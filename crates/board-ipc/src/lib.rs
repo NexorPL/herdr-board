@@ -10,7 +10,7 @@ pub use std::os::unix::net::{UnixListener as Listener, UnixStream as Stream};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{connect_timeout, pipe_name, PipeListener, PipeStream};
+pub use windows::{connect_timeout, endpoint_exists, pipe_name, PipeListener, PipeStream};
 #[cfg(windows)]
 pub type Stream = PipeStream;
 #[cfg(windows)]

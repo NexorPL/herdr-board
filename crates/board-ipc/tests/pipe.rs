@@ -184,3 +184,18 @@ fn accept_after_the_client_already_left_yields_eof_and_keeps_serving() {
     assert_eq!(&byte, b"x");
     client.join().unwrap();
 }
+
+/// Existence probe that does not consume a pipe instance (no connection).
+#[cfg(windows)]
+#[test]
+fn endpoint_exists_reports_a_live_pipe_without_connecting() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = socket_path(&dir);
+    assert!(!board_ipc::endpoint_exists(&path));
+    let listener = Listener::bind(&path).unwrap();
+    assert!(board_ipc::endpoint_exists(&path));
+    // The single instance is still free: a real client connects and is accepted.
+    let client = thread::spawn(move || Stream::connect(&path).unwrap());
+    listener.accept().unwrap();
+    client.join().unwrap();
+}

@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    ERROR_BROKEN_PIPE, ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
+    ERROR_BROKEN_PIPE, ERROR_FILE_NOT_FOUND, ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
     ERROR_PIPE_NOT_CONNECTED, HANDLE, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Security::{
@@ -46,6 +46,16 @@ pub fn pipe_name(path: &Path) -> OsString {
     let mut name = OsString::from(r"\\.\pipe\");
     name.push(path.as_os_str());
     name
+}
+
+/// Whether a server currently serves the pipe for `path`, without connecting
+/// (a busy pipe still exists; only `ERROR_FILE_NOT_FOUND` means absent).
+pub fn endpoint_exists(path: &Path) -> bool {
+    // SAFETY: NUL-terminated UTF-16 name alive for the call.
+    if unsafe { WaitNamedPipeW(wide(&pipe_name(path)).as_ptr(), 1) } != 0 {
+        return true;
+    }
+    io::Error::last_os_error().raw_os_error() != Some(ERROR_FILE_NOT_FOUND as i32)
 }
 
 fn wide(name: &OsString) -> Vec<u16> {
