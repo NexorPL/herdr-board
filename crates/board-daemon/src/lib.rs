@@ -234,6 +234,7 @@ async fn async_main(db_path: PathBuf, socket_path: PathBuf) -> anyhow::Result<()
     Ok(())
 }
 
+#[cfg(unix)]
 fn spawn_signal_handler(d: Arc<Daemon>) {
     tokio::spawn(async move {
         use tokio::signal::unix::{signal, SignalKind};
@@ -260,6 +261,29 @@ fn spawn_signal_handler(d: Arc<Daemon>) {
         tokio::select! {
             _ = term.recv() => tracing::info!("SIGTERM received"),
             _ = int.recv() => tracing::info!("SIGINT received"),
+        }
+        d.trigger_shutdown();
+    });
+}
+
+#[cfg(windows)]
+fn spawn_signal_handler(d: Arc<Daemon>) {
+    tokio::spawn(async move {
+        use tokio::signal::windows::{ctrl_break, ctrl_c, ctrl_close, ctrl_shutdown};
+        let (Ok(mut c), Ok(mut b), Ok(mut close), Ok(mut shutdown)) =
+            (ctrl_c(), ctrl_break(), ctrl_close(), ctrl_shutdown())
+        else {
+            tracing::warn!(
+                error_category = "signal_handler",
+                "console control handler setup failed"
+            );
+            return;
+        };
+        tokio::select! {
+            _ = c.recv() => tracing::info!("CTRL_C received"),
+            _ = b.recv() => tracing::info!("CTRL_BREAK received"),
+            _ = close.recv() => tracing::info!("CTRL_CLOSE received"),
+            _ = shutdown.recv() => tracing::info!("CTRL_SHUTDOWN received"),
         }
         d.trigger_shutdown();
     });
