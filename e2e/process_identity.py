@@ -13,6 +13,7 @@ import platform
 import stat
 import struct
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -350,6 +351,10 @@ def _windows_snapshot(pid: int) -> Snapshot:
         ) != 0:
             raise IdentityError("cannot query Windows process information")
         params = pointer(info.PebBaseAddress + 0x20)
+        if not struct.unpack("<I", read(params + 0x08, 4))[0] & 0x1:
+            # RTL_USER_PROC_PARAMS_NORMALIZED is unset until the loader turns the
+            # buffer offsets into pointers; callers retry.
+            raise IdentityError("Windows process parameters not yet normalized")
         command_length = struct.unpack("<H", read(params + 0x70, 2))[0]
         command_line = read(pointer(params + 0x78), command_length).decode("utf-16-le")
         environment_size = pointer(params + 0x3F0)
@@ -403,7 +408,15 @@ def snapshot(pid: int) -> Snapshot:
     if PLATFORM == "darwin":
         return _darwin_snapshot(pid)
     if PLATFORM == "windows":
-        return _windows_snapshot(pid)
+        # Another process's PEB can change under us (e.g. the environment block
+        # is reallocated); take a few consistent-read attempts before failing.
+        for attempt in range(5):
+            try:
+                return _windows_snapshot(pid)
+            except IdentityError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.01)
     raise IdentityError("unsupported E2E platform")
 
 
