@@ -2,7 +2,8 @@
 
 use std::fs::{self, OpenOptions};
 use std::io;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -104,7 +105,10 @@ fn ensure_private_dir(path: &Path) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir_all(path)?,
         Err(error) => return Err(error),
     }
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+    // Windows: the profile ACL of the log directory is already owner-only.
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    Ok(())
 }
 
 /// Remove only exact owned regular daily files modified more than 30 days ago.
@@ -231,13 +235,7 @@ impl DailyFile {
     fn open(dir: &Path) -> io::Result<Self> {
         ensure_private_dir(dir)?;
         let path = daily_path(dir, unix_now());
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(path)?;
-        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        let file = paths::open_private_file(OpenOptions::new().create(true).append(true), &path)?;
         Ok(Self::File(file))
     }
 }
@@ -268,9 +266,13 @@ impl io::Write for DailyFile {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::{symlink, PermissionsExt};
+    #[cfg(unix)]
     use std::process::Command;
     use std::time::{Duration, UNIX_EPOCH};
+
+    #[cfg(unix)]
 
     const SENTINEL: &str = "DIAGNOSTIC_SECRET_PROMPT_7b90";
 
@@ -289,6 +291,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn daily_ndjson_is_private_redacted_and_prunes_only_expired_owned_files() {
         let dir = tempfile::tempdir().unwrap();
@@ -419,6 +422,7 @@ mod tests {
         assert!(!expired.exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn failed_daily_writer_has_a_bounded_private_detached_fallback() {
         use std::process::Stdio;
@@ -457,6 +461,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn daily_writer_restricts_an_existing_regular_file_before_use() {
         let dir = tempfile::tempdir().unwrap();
@@ -473,6 +478,7 @@ mod tests {
         assert_eq!(fs::read_to_string(path).unwrap(), "existing\n");
     }
 
+    #[cfg(unix)]
     #[test]
     fn daily_writer_refuses_an_owned_name_symlink() {
         let dir = tempfile::tempdir().unwrap();
