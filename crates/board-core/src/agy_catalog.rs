@@ -57,7 +57,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -217,7 +217,7 @@ pub fn load_from_cli(agy_bin: &str) -> Option<Vec<ModelInfo>> {
 /// read, a non-zero exit, or a lost reader thread.
 pub fn load_from_cli_bounded(agy_bin: &str, timeout: Duration) -> Option<Vec<ModelInfo>> {
     let argv = models_argv(agy_bin);
-    let mut child = Command::new(&argv[0])
+    let mut child = crate::process::command(&argv[0])
         .args(&argv[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

@@ -34,7 +34,7 @@
 //! subprocess reading; nothing mutates state.
 
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -295,7 +295,7 @@ pub fn load_from_cli(opencode_bin: &str) -> Option<Vec<ModelInfo>> {
 /// or a lost reader thread — the caller keeps the static fallback either way.
 pub fn load_from_cli_bounded(opencode_bin: &str, timeout: Duration) -> Option<Vec<ModelInfo>> {
     let argv = models_argv(opencode_bin);
-    let mut child = Command::new(&argv[0])
+    let mut child = crate::process::command(&argv[0])
         .args(&argv[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
