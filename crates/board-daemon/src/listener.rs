@@ -2,6 +2,7 @@
 //! (`\.\pipe\` + socket path) rotated one instance per client.
 
 use std::io;
+#[cfg(any(windows, test))]
 use std::path::Path;
 
 #[cfg(unix)]
