@@ -160,3 +160,27 @@ fn nonblocking_read_without_data_would_block() {
         .wait_readable(Some(Duration::from_millis(50)))
         .unwrap());
 }
+
+/// A client that connects and leaves before the server accepts is still an
+/// accepted connection that reads EOF (Unix `accept` semantics); the listener
+/// keeps serving afterwards.
+#[test]
+fn accept_after_the_client_already_left_yields_eof_and_keeps_serving() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = socket_path(&dir);
+    let listener = Listener::bind(&path).unwrap();
+    drop(Stream::connect(&path).unwrap());
+
+    let mut gone = listener.accept().unwrap().0;
+    assert_eq!(gone.read(&mut [0u8; 8]).unwrap(), 0);
+
+    let client = thread::spawn(move || {
+        let mut stream = Stream::connect(&path).unwrap();
+        stream.write_all(b"x").unwrap();
+    });
+    let mut next = listener.accept().unwrap().0;
+    let mut byte = [0u8; 1];
+    next.read_exact(&mut byte).unwrap();
+    assert_eq!(&byte, b"x");
+    client.join().unwrap();
+}

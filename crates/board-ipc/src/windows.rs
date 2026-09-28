@@ -20,8 +20,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    ERROR_BROKEN_PIPE, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, HANDLE,
-    INVALID_HANDLE_VALUE,
+    ERROR_BROKEN_PIPE, ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
+    ERROR_PIPE_NOT_CONNECTED, HANDLE, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Security::{
     GetLengthSid, GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER,
@@ -55,7 +55,9 @@ fn wide(name: &OsString) -> Vec<u16> {
 fn is_eof(error: &io::Error) -> bool {
     matches!(
         error.raw_os_error(),
-        Some(code) if code == ERROR_BROKEN_PIPE as i32 || code == ERROR_PIPE_NOT_CONNECTED as i32
+        Some(code) if code == ERROR_BROKEN_PIPE as i32
+            || code == ERROR_PIPE_NOT_CONNECTED as i32
+            || code == ERROR_NO_DATA as i32
     )
 }
 
@@ -278,7 +280,13 @@ impl PipeListener {
         let ok = unsafe { ConnectNamedPipe(next.as_raw_handle() as HANDLE, std::ptr::null_mut()) };
         if ok == 0 {
             let error = io::Error::last_os_error();
-            if error.raw_os_error() != Some(ERROR_PIPE_CONNECTED as i32) {
+            // PIPE_CONNECTED: the client arrived first. NO_DATA: it arrived and
+            // already left — still an accepted connection that reads EOF, as
+            // with a Unix `accept`.
+            if !matches!(
+                error.raw_os_error(),
+                Some(code) if code == ERROR_PIPE_CONNECTED as i32 || code == ERROR_NO_DATA as i32
+            ) {
                 return Err(error);
             }
         }
