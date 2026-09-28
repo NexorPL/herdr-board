@@ -216,7 +216,6 @@ fn agy_catalog_fixture(dir: &tempfile::TempDir, stdout: &str) -> std::path::Path
 }
 
 #[cfg(unix)]
-
 const AGY_CATALOG_UP_FIXTURE: &str = r#"{
   "conversation_id": "",
   "status": "SUCCESS",

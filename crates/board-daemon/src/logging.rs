@@ -273,7 +273,6 @@ mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
     #[cfg(unix)]
-
     const SENTINEL: &str = "DIAGNOSTIC_SECRET_PROMPT_7b90";
 
     #[test]

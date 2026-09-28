@@ -19,7 +19,8 @@ pub(crate) struct Listener {
 }
 
 impl Listener {
-    #[cfg(unix)]
+    /// Unix production binds through `bind_secured_socket` + `from_unix`.
+    #[cfg(all(unix, test))]
     pub(crate) fn bind(path: &Path) -> io::Result<Self> {
         Ok(Self::from_unix(tokio::net::UnixListener::bind(path)?))
     }
