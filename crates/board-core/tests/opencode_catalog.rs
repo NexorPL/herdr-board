@@ -29,6 +29,9 @@
 //!   `variants: {}`) plus the fixture model
 //!   `opencode/deepseek-v4-flash-free` (low/high/max — verified live).
 
+// The CLI-fallback tests drive a fake `/bin/sh` binary and are Unix-only.
+#![cfg_attr(windows, allow(unused_imports))]
+
 use std::fs;
 use std::time::{Duration, Instant};
 

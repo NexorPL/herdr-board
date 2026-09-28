@@ -31,6 +31,9 @@
 //!   the antigravity harness then degrades to free-form (stored models keep
 //!   running).
 
+// The CLI-fallback tests drive a fake `/bin/sh` binary and are Unix-only.
+#![cfg_attr(windows, allow(unused_imports))]
+
 use std::fs;
 use std::time::{Duration, Instant};
 
