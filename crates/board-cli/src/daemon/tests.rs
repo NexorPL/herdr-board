@@ -1,10 +1,17 @@
+#[cfg(unix)]
 use super::daemon_command;
+#[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::{symlink, PermissionsExt};
+#[cfg(unix)]
 use std::path::Path;
+#[cfg(unix)]
 use std::thread;
+#[cfg(unix)]
 use std::time::Duration;
 
+#[cfg(unix)]
 #[test]
 fn detached_bootstrap_log_is_private_and_truncated_per_start() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -47,6 +54,7 @@ fn detached_bootstrap_log_is_private_and_truncated_per_start() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn daemon_child_owns_a_distinct_process_group() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -97,4 +105,25 @@ fn daemon_child_owns_a_distinct_process_group() {
 
     child.kill().expect("kill probe");
     child.wait().expect("reap probe");
+}
+
+#[cfg(windows)]
+#[test]
+fn stop_reports_not_running_when_no_pipe_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("boardd.sock");
+    assert!(matches!(
+        super::check_listener_after_connect_failure(&path, super::file_identity(&path)),
+        super::ListenerCheck::Gone
+    ));
+}
+
+#[cfg(windows)]
+#[test]
+fn bootstrap_log_is_truncated_per_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("bootstrap.log");
+    std::fs::write(&log, "stale").unwrap();
+    drop(super::open_bootstrap_log(&log).unwrap());
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "");
 }
