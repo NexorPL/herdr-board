@@ -131,7 +131,7 @@ dependencies = [
  "anyhow",
  "board-core",
  "board-herdr",
- "libc",
+ "board-ipc",
  "rusqlite",
  "serde",
  "serde_json",

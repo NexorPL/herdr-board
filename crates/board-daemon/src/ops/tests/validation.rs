@@ -205,6 +205,7 @@ fn duplicate_board_rename_is_a_bad_request_over_the_rpc() {
 // The catalog-up probes shell out to a fixture `agy` for real, mirroring the
 // discovery overlay tests.
 
+#[cfg(unix)]
 fn agy_catalog_fixture(dir: &tempfile::TempDir, stdout: &str) -> std::path::PathBuf {
     let script = format!("#!/bin/sh\ncat <<'HBEOF'\n{stdout}\nHBEOF\n");
     let bin = dir.path().join("agy-fixture");
@@ -213,6 +214,8 @@ fn agy_catalog_fixture(dir: &tempfile::TempDir, stdout: &str) -> std::path::Path
     std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
     bin
 }
+
+#[cfg(unix)]
 
 const AGY_CATALOG_UP_FIXTURE: &str = r#"{
   "conversation_id": "",
@@ -231,6 +234,7 @@ const AGY_CATALOG_UP_FIXTURE: &str = r#"{
 }
 "#;
 
+#[cfg(unix)]
 #[test]
 fn antigravity_card_create_rejects_removed_model_when_catalog_up() {
     // The live catalog no longer lists the stored model: card.create must
