@@ -94,7 +94,9 @@ assert x["prompt"] == show["runs"][-1]["prompt_snapshot"]
 assert x["prompt"].startswith("configured prompt with spaces\nand a newline\n\n")
 assert x["system_prompt"].startswith("## herdr-board protocol\n")
 assert "$BOARD_CARD_ID" in x["system_prompt"]
-assert x["board_socket"] == board and x["herdr_socket"] == herdr
+# normpath: boardd may re-spell a Windows socket path with `\` separators.
+assert os.path.normpath(x["board_socket"]) == os.path.normpath(board)
+assert os.path.normpath(x["herdr_socket"]) == os.path.normpath(herdr)
 assert os.path.realpath(x["cwd"]) == os.path.realpath(cwd)
 print("  configured argv preserved; card/run, BOARD_SYSTEM_PROMPT, sockets, canonical cwd exact")
 PY

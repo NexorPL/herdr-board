@@ -61,20 +61,58 @@ case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) E2E_WINDOWS=1 ;;
   *) E2E_WINDOWS=0 ;;
 esac
-if [ "$E2E_WINDOWS" = 1 ] && ! python3 -c '' >/dev/null 2>&1; then
-  E2E_PYTHON="${E2E_PYTHON:-$(type -P python 2>/dev/null || true)}"
+# Scenarios run with a system-only PATH, so run-all passes the resolved
+# interpreter down as E2E_PYTHON.
+if [ "$E2E_WINDOWS" = 1 ]; then
+  if [ -z "${E2E_PYTHON:-}" ]; then
+    for _e2e_python in python3 python; do
+      _e2e_python="$(type -P "$_e2e_python" 2>/dev/null || true)"
+      [ -n "$_e2e_python" ] && "$_e2e_python" -c '' >/dev/null 2>&1 && { E2E_PYTHON="$_e2e_python"; break; }
+    done
+    unset _e2e_python
+  fi
   "${E2E_PYTHON:-false}" -c '' >/dev/null 2>&1 \
     || { printf 'E2E FAIL: %s\n' "no working python3/python on PATH" >&2; exit 1; }
   python3() { "$E2E_PYTHON" "$@"; }
   export E2E_PYTHON
   export -f python3
 fi
+# Native Windows programs never see MSYS mounts, and MSYS rewrites only some
+# argv/env values. Every path the harness hands out is therefore spelled
+# `C:/…` (long form), which bash, Herdr, boardd and Windows Python all accept
+# verbatim; argv conversion is switched off so nothing is rewritten behind us.
+if [ "$E2E_WINDOWS" = 1 ]; then
+  export MSYS_NO_PATHCONV=1
+  E2E_TMP_ROOT="$(cygpath -m -l /tmp)"
+else
+  E2E_TMP_ROOT=/tmp
+fi
+e2e_native_path() {
+  if [ "$E2E_WINDOWS" = 1 ]; then cygpath -m -l "$1"; else printf '%s\n' "$1"; fi
+}
+e2e_is_abs() {
+  [[ "$1" == /* ]] || { [ "$E2E_WINDOWS" = 1 ] && [[ "$1" == [A-Za-z]:/* ]]; }
+}
+# e2e_argv0 <exe> — how an exe spawned by this shell spells its own argv[0]:
+# Git Bash always hands a native child its full `C:\…\name.exe` path.
+e2e_argv0() {
+  local path="$1"
+  if [ "$E2E_WINDOWS" = 1 ]; then
+    path="$(cygpath -w -l "$path")"
+    [[ "${path,,}" == *.exe ]] || path="$path.exe"
+  fi
+  printf '%s\n' "$path"
+}
 
 # --- paths & tools ----------------------------------------------------------
-E2E_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-REPO_ROOT="$(cd "$E2E_LIB_DIR/.." && pwd)"
+E2E_LIB_DIR="$(e2e_native_path "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)")"
+REPO_ROOT="$(e2e_native_path "$(cd "$E2E_LIB_DIR/.." && pwd)")"
 HERDR_BIN="${HERDR_BIN_PATH:-herdr}"
 BOARD_BIN="${BOARD_BIN:-$REPO_ROOT/target/release/board}"
+if [ "$E2E_WINDOWS" = 1 ]; then
+  BOARD_BIN="$(e2e_native_path "$BOARD_BIN")"
+  [[ "${BOARD_BIN,,}" == *.exe ]] || BOARD_BIN="$BOARD_BIN.exe"
+fi
 E2E_FAKE_AGENT="${E2E_FAKE_AGENT:-$E2E_LIB_DIR/fake-agent.sh}"
 HRPC="$E2E_LIB_DIR/hrpc.py"
 E2E_FAKE_PI_BIN_DIR="$E2E_LIB_DIR/fake-bin"
@@ -101,21 +139,25 @@ e2e_identity_python() {
 
 # e2e_os_pid <pid> — the OS PID for a PID bash reports (`$!`). Git Bash hands
 # out MSYS PIDs; the identity layer inspects native Windows processes.
+# Once the MSYS PID is gone its /proc entry is too, so the Windows PID captured
+# into an owned identity is remembered (in this shell) for later checks.
+declare -Ag E2E_OS_PIDS=()
 e2e_os_pid() {
-  if [ "$E2E_WINDOWS" = 1 ] && [ -r "/proc/$1/winpid" ]; then
+  if [ "$E2E_WINDOWS" = 1 ] && [ -n "${E2E_OS_PIDS[$1]:-}" ]; then
+    printf '%s\n' "${E2E_OS_PIDS[$1]}"
+  elif [ "$E2E_WINDOWS" = 1 ] && [ -r "/proc/$1/winpid" ]; then
     cat "/proc/$1/winpid"
   else
     printf '%s\n' "$1"
   fi
 }
+# e2e_os_pid_remember <pid> <identity-token>
+e2e_os_pid_remember() {
+  [ "$E2E_WINDOWS" = 1 ] || return 0
+  E2E_OS_PIDS["$1"]="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["pid"])' "$2")"
+}
 
 e2e_stat_mode() { python3 "$E2E_PROCESS_IDENTITY" mode "$1"; }
-e2e_realpath() {
-  local resolved
-  resolved="$(python3 "$E2E_PROCESS_IDENTITY" realpath "$1")" || return
-  # Keep the shell's own spelling so comparisons with bash paths hold.
-  if [ "$E2E_WINDOWS" = 1 ]; then cygpath -u "$resolved"; else printf '%s\n' "$resolved"; fi
-}
 e2e_process_exists() { python3 "$E2E_PROCESS_IDENTITY" exists "$(e2e_os_pid "$1")"; }
 e2e_process_state() { python3 "$E2E_PROCESS_IDENTITY" state "$(e2e_os_pid "$1")"; }
 e2e_identity_sign_json() { e2e_identity_python sign "$1"; }
@@ -126,7 +168,7 @@ e2e_path_is_canonical() {
 import os,sys
 path=os.path.abspath(sys.argv[1])
 expected=("/private"+path) if sys.platform == "darwin" and path.startswith("/tmp/") else path
-raise SystemExit(0 if os.path.realpath(path) == expected else 1)
+raise SystemExit(0 if os.path.normcase(os.path.realpath(path)) == os.path.normcase(expected) else 1)
 PY
 }
 
@@ -157,7 +199,7 @@ e2e_artifact_invocation_validate() {
   [ -n "${E2E_SCENARIO_ARTIFACT_DIR:-}" ] || return 0
   [ -n "${E2E_INVOCATION_ARTIFACT_ROOT:-}" ] && [ -n "${E2E_INVOCATION_TOKEN:-}" ] \
     && [ -n "${E2E_INVOCATION_OWNER_ID:-}" ] \
-    && e2e_private_dir_verify "$E2E_INVOCATION_ARTIFACT_ROOT" '/tmp/hb-e2e-run.??????' \
+    && e2e_private_dir_verify "$E2E_INVOCATION_ARTIFACT_ROOT" "$E2E_TMP_ROOT/hb-e2e-run.??????" \
     && e2e_marker_shape_verify "$E2E_INVOCATION_ARTIFACT_ROOT/.owned-artifacts" \
       herdr-board-e2e-artifacts "$E2E_INVOCATION_OWNER_ID" "$E2E_INVOCATION_TOKEN" \
     && e2e_private_dir_verify "$E2E_SCENARIO_ARTIFACT_DIR" "$E2E_INVOCATION_ARTIFACT_ROOT/*" \
@@ -168,6 +210,18 @@ e2e_artifact_invocation_validate() {
   E2E_ARTIFACT_INVOCATION_VALIDATED=1
 }
 
+# Windows Herdr keeps its session registry under XDG_CONFIG_HOME (else
+# %APPDATA%), never HOME: point it into the scenario root too. Its config there
+# gives pane shells Git Bash, so pane commands keep the harness's shell syntax.
+e2e_herdr_home_export() {
+  [ "$E2E_WINDOWS" = 1 ] || return 0
+  export XDG_CONFIG_HOME="$E2E_SCENARIO_ROOT/.config"
+  [ -f "$XDG_CONFIG_HOME/herdr/config.toml" ] && return 0
+  mkdir -p "$XDG_CONFIG_HOME/herdr"
+  printf "[terminal]\ndefault_shell = '%s'\n" "$(e2e_argv0 "${E2E_BASH:-$BASH}")" \
+    >"$XDG_CONFIG_HOME/herdr/config.toml"
+}
+
 e2e_scenario_root_ensure() {
   e2e_identity_key_ensure
   local owner="${E2E_OWNER_ID:-standalone-$$}"
@@ -176,10 +230,11 @@ e2e_scenario_root_ensure() {
   if [ -n "${E2E_SCENARIO_ROOT:-}" ]; then
     [ "${E2E_LOCAL_SCENARIO_ROOT:-}" = "$E2E_SCENARIO_ROOT" ] \
       && [ "${E2E_LOCAL_INVOCATION_TOKEN:-}" = "${E2E_INVOCATION_TOKEN:-}" ] \
-      && e2e_private_dir_verify "$E2E_SCENARIO_ROOT" '/tmp/h????????' \
+      && e2e_private_dir_verify "$E2E_SCENARIO_ROOT" "$E2E_TMP_ROOT/h????????" \
       && e2e_marker_shape_verify "$E2E_SCENARIO_ROOT/.disposable" herdr-board-e2e "$owner" "$E2E_INVOCATION_TOKEN" \
       || fail "refusing inherited or malformed E2E_SCENARIO_ROOT"
     export HOME="$E2E_SCENARIO_ROOT"
+    e2e_herdr_home_export
     return 0
   fi
   umask 077
@@ -194,7 +249,7 @@ e2e_scenario_root_ensure() {
   for (( attempt=0; attempt<20; attempt++ )); do
     nonce="$(python3 -c 'import secrets; print(secrets.token_hex(4))')" \
       || fail "cannot generate scenario nonce"
-    E2E_SCENARIO_ROOT="/tmp/h$nonce"
+    E2E_SCENARIO_ROOT="$E2E_TMP_ROOT/h$nonce"
     if mkdir -m 700 "$E2E_SCENARIO_ROOT" 2>/dev/null; then break; fi
     E2E_SCENARIO_ROOT=""
   done
@@ -204,6 +259,7 @@ e2e_scenario_root_ensure() {
   E2E_LOCAL_SCENARIO_ROOT="$E2E_SCENARIO_ROOT"
   E2E_LOCAL_INVOCATION_TOKEN="$E2E_INVOCATION_TOKEN"
   export E2E_INVOCATION_TOKEN E2E_SCENARIO_ROOT HOME="$E2E_SCENARIO_ROOT"
+  e2e_herdr_home_export
   e2e_resource_manifest_init || fail "cannot initialize exact-resource manifest"
   e2e_root_resource_register scenario scenario-root "$E2E_SCENARIO_ROOT" "$E2E_SCENARIO_ROOT/.disposable" \
     || fail "cannot record early scenario root ownership"
@@ -217,7 +273,7 @@ e2e_enable_fake_pi() {
   e2e_scenario_root_ensure
   if [ -n "${E2E_MANAGED_ROOT:-}" ]; then
     [ "${E2E_LOCAL_MANAGED_ROOT:-}" = "$E2E_MANAGED_ROOT" ] \
-      && e2e_private_dir_verify "$E2E_MANAGED_ROOT" '/tmp/hb-e2e-managed.??????' \
+      && e2e_private_dir_verify "$E2E_MANAGED_ROOT" "$E2E_TMP_ROOT/hb-e2e-managed.??????" \
       && e2e_marker_shape_verify "$E2E_MANAGED_ROOT/.herdr-board-fake-managed" \
         'herdr-board fake-managed boundary' "${E2E_OWNER_ID:-standalone-$$}" "$E2E_INVOCATION_TOKEN" \
       && e2e_private_dir_verify "$E2E_MANAGED_ROOT/home" "$E2E_MANAGED_ROOT/home" \
@@ -233,7 +289,7 @@ e2e_enable_fake_pi() {
   # in a fake-managed pane. This root belongs only to the scenario's primary
   # disposable session.
   if [ -z "${E2E_MANAGED_ROOT:-}" ]; then
-    E2E_MANAGED_ROOT="$(mktemp -d /tmp/hb-e2e-managed.XXXXXX)"
+    E2E_MANAGED_ROOT="$(mktemp -d "$E2E_TMP_ROOT/hb-e2e-managed.XXXXXX")"
     printf 'herdr-board fake-managed boundary\nowner=%s\ntoken=%s\n' \
       "${E2E_OWNER_ID:-standalone-$$}" "$E2E_INVOCATION_TOKEN" >"$E2E_MANAGED_ROOT/.herdr-board-fake-managed"
     chmod 600 "$E2E_MANAGED_ROOT/.herdr-board-fake-managed"
@@ -292,13 +348,13 @@ e2e_resolve_herdr_bin() {
   # `command -v` reports shell functions, which would let an inherited function
   # replace the real Herdr CLI. `type -P` deliberately searches executables only.
   # An explicit absolute HERDR_BIN_PATH is retained verbatim for auditability.
-  if [[ "$configured" == /* ]]; then
+  if e2e_is_abs "$configured"; then
     resolved="$configured"
   else
     resolved="$(type -P "$configured" 2>/dev/null || true)"
   fi
-  if [[ "$resolved" == /* ]] && [ -x "$resolved" ]; then
-    HERDR_BIN="$resolved"
+  if e2e_is_abs "$resolved" && [ -x "$resolved" ]; then
+    HERDR_BIN="$(e2e_native_path "$resolved")"
   fi
   HERDR_BIN_RESOLVED=1
 }
@@ -306,7 +362,7 @@ e2e_resolve_herdr_bin() {
 # e2e_require — verify the tools every scenario needs.
 e2e_require() {
   e2e_resolve_herdr_bin
-  [[ "$HERDR_BIN" == /* ]] && [ -x "$HERDR_BIN" ] \
+  e2e_is_abs "$HERDR_BIN" && [ -x "$HERDR_BIN" ] \
     || fail "herdr CLI must resolve to an absolute executable ($HERDR_BIN)"
   command -v python3 >/dev/null 2>&1 || fail "python3 required (JSON parsing / hrpc.py)"
   [ -f "$E2E_FAKE_AGENT" ] || fail "fake agent missing at $E2E_FAKE_AGENT"
@@ -632,15 +688,16 @@ e2e_audit_owned_manifest() {
   # Darwin may lazily recreate $HOME/Library when Python starts. The scenario
   # root is deliberately removed before this final audit, so never let the
   # audit process recreate that just-released root.
-  HOME=/var/empty CFFIXED_USER_HOME=/var/empty python3 - "$manifest" "$keep" "$E2E_PROCESS_IDENTITY" \
-    3<<<"$E2E_LOCAL_IDENTITY_KEY" <<'PY'
+  local audit_py
+  audit_py="$(cat <<'PY'
 import hashlib, importlib.util, json, os, sys
 
 spec=importlib.util.spec_from_file_location("e2e_process_identity", sys.argv[3])
 identity=importlib.util.module_from_spec(spec); sys.modules[spec.name]=identity
 spec.loader.exec_module(identity)
-with os.fdopen(3, "rb", closefd=True) as key_file:
-    identity_key=key_file.read().rstrip(b"\n")
+# A native Windows process inherits no fd 3; stdin carries the key there.
+with (sys.stdin.buffer if os.name == "nt" else os.fdopen(3, "rb", closefd=True)) as key_file:
+    identity_key=key_file.read().rstrip(b"\r\n")
 IDENTITY_KEYS = {"version","platform","proof","parent_pid","pid","start_time","exe",
                  "session","name","expected_command","owner_token","cmdline","signature"}
 BASE_KEYS = {"version","op","resource_id","logical_id","generation","kind","role"}
@@ -679,7 +736,7 @@ def marker_matches(record, path):
     except OSError: return False
 
 def check_abs(value):
-    return isinstance(value, str) and value.startswith("/") and "\0" not in value
+    return isinstance(value, str) and os.path.isabs(value) and "\0" not in value
 
 failed = False
 keep = sys.argv[2] == "1"
@@ -783,6 +840,13 @@ for r in registrations:
         failed = True
 raise SystemExit(1 if failed else 0)
 PY
+)"
+  if [ "$E2E_WINDOWS" = 1 ]; then
+    python3 -c "$audit_py" "$manifest" "$keep" "$E2E_PROCESS_IDENTITY" <<<"$E2E_LOCAL_IDENTITY_KEY"
+  else
+    HOME=/var/empty CFFIXED_USER_HOME=/var/empty python3 -c "$audit_py" "$manifest" "$keep" \
+      "$E2E_PROCESS_IDENTITY" 3<<<"$E2E_LOCAL_IDENTITY_KEY"
+  fi
 }
 
 # --- cleanup registry -------------------------------------------------------
@@ -973,7 +1037,7 @@ e2e_scenario_root_remove_owned() {
   fi
   [ -e "$root" ] || return 0
   case "$root" in
-    /tmp/h????????)
+    "$E2E_TMP_ROOT"/h????????)
       [ -d "$root" ] && e2e_marker_resource_verify root scenario-root "$root/.disposable" || {
         printf 'E2E FAIL: refusing changed/unowned scenario-root cleanup: %s\n' "$root" >&2; return 1;
       }
@@ -1004,7 +1068,7 @@ e2e_resource_manifest_init() {
   else
     [ -z "${E2E_INVOCATION_ARTIFACT_ROOT:-}" ] \
       || { printf 'E2E FAIL: artifact root requires an owned scenario artifact\n' >&2; return 1; }
-    E2E_OWNED_RESOURCE_MANIFEST="$(mktemp /tmp/hb-e2e-owned.XXXXXX)" || return 1
+    E2E_OWNED_RESOURCE_MANIFEST="$(mktemp "$E2E_TMP_ROOT/hb-e2e-owned.XXXXXX")" || return 1
     E2E_RESOURCE_MANIFEST_STANDALONE=1
   fi
   : >"$E2E_OWNED_RESOURCE_MANIFEST"
@@ -1079,7 +1143,8 @@ e2e_process_resource_register() {
   local role="$1" logical="$2" pid="$3" identity="$4" payload
   case "$role" in board-daemon|helper|proxy) ;; *) return 1 ;; esac
   e2e_process_identity_verify "$pid" "$identity" || return 1
-  payload="$(python3 - "$pid" "$identity" <<'PY'
+  e2e_os_pid_remember "$pid" "$identity"
+  payload="$(python3 - "$(e2e_os_pid "$pid")" "$identity" <<'PY'
 import json,sys
 print(json.dumps({"pid":sys.argv[1],"identity":json.loads(sys.argv[2])},separators=(",",":"),sort_keys=True))
 PY
@@ -1098,10 +1163,12 @@ e2e_owned_process_start() {
   shift 6
   local owner_token pid provisional identity i deferred provisional_logical="process-provisional-$logical"
   case "$role" in helper|proxy) ;; *) fail "invalid owned process role: $role" ;; esac
-  [[ "$command" == /* ]] && [ -x "$command" ] || fail "owned process command must be absolute"
+  e2e_is_abs "$command" && [ -x "$command" ] || fail "owned process command must be absolute"
   owner_token="$(python3 -c 'import secrets; print(secrets.token_hex(16))')" \
     || fail "cannot generate helper ownership token"
-  env E2E_HERDR_OWNER_TOKEN="$owner_token" "$command" "$@" >"$log" 2>&1 &
+  # Subshell + exec, not `env`: on Git Bash an MSYS `env` is one more process
+  # hop between this shell and the native child, which breaks direct-child proof.
+  ( E2E_HERDR_OWNER_TOKEN="$owner_token" exec "$command" "$@" ) >"$log" 2>&1 &
   pid=$!
   provisional=""
   for (( i=0; i<20; i++ )); do
@@ -1119,7 +1186,7 @@ e2e_owned_process_start() {
   identity=""
   for (( i=0; i<30; i++ )); do
     identity="$(e2e_process_identity_capture "$pid" "$identity_session" "$identity_name" \
-      "$command" "$owner_token" E2E_HERDR_OWNER_TOKEN "$provisional")" && break
+      "$(e2e_argv0 "$command")" "$owner_token" E2E_HERDR_OWNER_TOKEN "$provisional")" && break
     sleep 0.01
   done
   if [ -z "$identity" ]; then
@@ -1152,17 +1219,27 @@ e2e_owned_process_stop() {
   unset 'E2E_OWNED_PROCESS_PIDS[$logical]' 'E2E_OWNED_PROCESS_IDENTITIES[$logical]'
 }
 
+# A socket path names a Unix socket, or on Windows the pipe `\\.\pipe\<path>`.
+e2e_endpoint_exists() {
+  if [ "$E2E_WINDOWS" = 1 ]; then
+    python3 -c 'import os,sys; sys.exit(0 if os.path.exists(r"\\.\pipe" + "\\" + sys.argv[1]) else 1)' "$1"
+  else
+    [ -S "$1" ]
+  fi
+}
+
 e2e_proxy_start() {
   local listen="$1" control="$2" target="$3" python
-  python="$(type -P python3)"
+  python="${E2E_PYTHON:-$(type -P python3)}"
   e2e_owned_process_start proxy herdr-proxy "$listen" "$control" "$E2E_TMP/proxy.log" \
     "$python" "$E2E_LIB_DIR/herdr-proxy.py" --listen "$listen" --control "$control" --target "$target"
   local i
   for (( i=0; i<50; i++ )); do
-    [ -S "$listen" ] && [ -S "$control" ] && break
+    e2e_endpoint_exists "$listen" && e2e_endpoint_exists "$control" && break
     sleep 0.02
   done
-  [ -S "$listen" ] && [ -S "$control" ] || fail "Herdr proxy did not create owned sockets"
+  e2e_endpoint_exists "$listen" && e2e_endpoint_exists "$control" \
+    || fail "Herdr proxy did not create owned sockets"
   E2E_PROXY_SOCKET="$listen" E2E_PROXY_CONTROL="$control"
   export E2E_PROXY_SOCKET E2E_PROXY_CONTROL
 }
@@ -1174,9 +1251,17 @@ e2e_proxy_command() {
     || fail "refusing proxy control: identity changed"
   python3 - "$E2E_PROXY_CONTROL" "$command" <<'PY'
 import json,socket,sys
-s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(sys.argv[1])
-s.sendall(json.dumps({"command":sys.argv[2]}).encode()+b"\n")
-f=s.makefile(); response=json.loads(f.readline())
+request=json.dumps({"command":sys.argv[2]}).encode()+b"\n"
+if sys.platform == "win32":
+    with open(r"\\.\pipe" + "\\" + sys.argv[1], "r+b", buffering=0) as pipe:
+        pipe.write(request); buffer=b""
+        while b"\n" not in buffer and (chunk := pipe.read(4096)):
+            buffer += chunk
+    response=json.loads(buffer.split(b"\n",1)[0])
+else:
+    s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect(sys.argv[1])
+    s.sendall(request)
+    f=s.makefile(); response=json.loads(f.readline())
 if not response.get("ok"): raise SystemExit(response.get("error","proxy command failed"))
 print(json.dumps(response,separators=(",",":"),sort_keys=True))
 PY
@@ -1289,7 +1374,7 @@ e2e_managed_root_remove_early_owned() {
   local root="${E2E_MANAGED_ROOT:-}"
   [ -e "$root" ] || return 0
   [ "${E2E_MANAGED_ROOT_CREATOR_PID:-}" = "$$" ] \
-    && e2e_private_dir_verify "$root" '/tmp/hb-e2e-managed.??????' \
+    && e2e_private_dir_verify "$root" "$E2E_TMP_ROOT/hb-e2e-managed.??????" \
     && e2e_marker_resource_verify root managed-root "$root/.herdr-board-fake-managed" \
     || { printf 'E2E FAIL: refusing early managed-root cleanup: %s\n' "$root" >&2; return 1; }
   rm -rf -- "$root" || return 1
@@ -1309,7 +1394,7 @@ e2e_managed_root_remove_owned() {
   fi
   [ -e "$root" ] || return 0
   case "$root" in
-    /tmp/hb-e2e-managed.*)
+    "$E2E_TMP_ROOT"/hb-e2e-managed.*)
       [ -d "$root" ] && e2e_marker_resource_verify root managed-root "$root/.herdr-board-fake-managed" \
         || { printf 'E2E FAIL: refusing changed/unowned managed-root cleanup: %s\n' "$root" >&2; return 1; }
       rm -rf -- "$root"
@@ -1336,7 +1421,7 @@ e2e_session_delete_authorized() {
   registry="$HOME/.config/herdr/sessions/$name"
   ! e2e_process_exists "$pid" || { printf 'E2E FAIL: session process still exists: %s\n' "$name" >&2; return 1; }
   e2e_identity_token_validate "$identity" || { printf 'E2E FAIL: unsigned/changed identity for post-stop delete: %s\n' "$name" >&2; return 1; }
-  python3 - "$identity" "$name" "$pid" <<'PY' || {
+  python3 - "$identity" "$name" "$(e2e_os_pid "$pid")" <<'PY' || {
 import json,sys
 try: t=json.loads(sys.argv[1])
 except Exception: raise SystemExit(1)
@@ -1424,7 +1509,7 @@ e2e_session_abort_owned() {
 # $(...) — a command-substitution subshell would drop the pid and thus its
 # teardown (same gotcha as e2e_ws_create).
 e2e_session_boot() {
-  local name="$1" sockvar="$2" pidvar="$3" identityvar="${4:-}" sock="" i _pid identity owner_token stable provisional logical command
+  local name="$1" sockvar="$2" pidvar="$3" identityvar="${4:-}" sock="" i _pid identity owner_token stable provisional logical command argv0
   e2e_session_name_absent "$name"
   e2e_session_owner_marker_create "$name"
   owner_token="$(python3 -c 'import secrets; print(secrets.token_hex(16))')" \
@@ -1435,13 +1520,15 @@ e2e_session_boot() {
     # discoverable through the normal session registry. Only shells inside
     # that session receive the generated, self-contained startup environment;
     # it never sources $HOME/.zshrc or any other user rc file.
-    env -u BASH_ENV -u ENV E2E_HERDR_OWNER_TOKEN="$owner_token" ZDOTDIR="$E2E_MANAGED_ZDOTDIR" \
-      "$HERDR_BIN" --session "$name" server >/dev/null 2>&1 &
+    # Subshell + exec rather than `env` keeps Herdr a direct child on Git Bash.
+    ( unset BASH_ENV ENV; E2E_HERDR_OWNER_TOKEN="$owner_token" ZDOTDIR="$E2E_MANAGED_ZDOTDIR" \
+      exec "$HERDR_BIN" --session "$name" server ) >/dev/null 2>&1 &
   else
-    env E2E_HERDR_OWNER_TOKEN="$owner_token" \
-      "$HERDR_BIN" --session "$name" server >/dev/null 2>&1 &
+    ( E2E_HERDR_OWNER_TOKEN="$owner_token" \
+      exec "$HERDR_BIN" --session "$name" server ) >/dev/null 2>&1 &
   fi
   _pid=$!
+  argv0="$(e2e_argv0 "$HERDR_BIN")"
   printf -v "$pidvar" '%s' "$_pid"
   logical="session-provisional-$name"
   provisional=""
@@ -1459,7 +1546,7 @@ e2e_session_boot() {
   # from this point terminates/reaps only this exact owner-token child.
   E2E_PROVISIONAL_CHILD_ARMED["$logical"]=1
   printf -v command 'e2e_provisional_child_abort %q %q %q %q %q' \
-    "$logical" "$_pid" "$provisional" "$HERDR_BIN" "$name"
+    "$logical" "$_pid" "$provisional" "$argv0" "$name"
   e2e_defer "$command"
   e2e_process_resource_register helper "$logical" "$_pid" "$provisional" \
     || fail "cannot ledger provisional exact-child evidence for '$name'"
@@ -1468,12 +1555,12 @@ e2e_session_boot() {
   # changes /proc identity; no unrelated process can be published by PID/name.
   identity=""
   for (( i=0; i<50; i++ )); do
-    identity="$(e2e_process_identity_capture "$_pid" "$name" "$name" "$HERDR_BIN" "$owner_token" \
+    identity="$(e2e_process_identity_capture "$_pid" "$name" "$name" "$argv0" "$owner_token" \
       E2E_HERDR_OWNER_TOKEN "$provisional")" && break
     sleep 0.02
   done
   if [ -z "$identity" ]; then
-    e2e_provisional_child_abort "$logical" "$_pid" "$provisional" "$HERDR_BIN" "$name" \
+    e2e_provisional_child_abort "$logical" "$_pid" "$provisional" "$argv0" "$name" \
       || fail "refusing unsafe provisional session cleanup for '$name'"
     e2e_managed_root_remove_owned "$name" || true
     fail "refusing ephemeral session '$name': could not capture server identity"
@@ -1488,7 +1575,7 @@ e2e_session_boot() {
   stable=""
   for (( i=0; i<30; i++ )); do
     sleep 0.1
-    stable="$(e2e_process_identity_capture "$_pid" "$name" "$name" "$HERDR_BIN" "$owner_token" \
+    stable="$(e2e_process_identity_capture "$_pid" "$name" "$name" "$argv0" "$owner_token" \
       E2E_HERDR_OWNER_TOKEN "$provisional")" || continue
     if [ "$stable" = "$identity" ]; then break; fi
     identity="$stable"
@@ -1519,9 +1606,13 @@ for s in sessions:
         print(s.get("socket_path", ""))
         break
 ' "$name" 2>/dev/null || true)"
-    if [ -n "$sock" ] && [ -S "$sock" ] \
+    # A Windows session serves a named pipe; the hrpc probe alone proves it.
+    if [ -n "$sock" ] && { [ "$E2E_WINDOWS" = 1 ] || [ -S "$sock" ]; } \
        && HERDR_SOCKET_PATH="$sock" python3 "$HRPC" workspace.list '{}' >/dev/null 2>&1; then
-      [ "${#sock}" -le 92 ] || fail "session socket path lacks required AF_UNIX margin (${#sock} bytes; max 92)"
+      # Windows isolates the registry through XDG_CONFIG_HOME; prove it held.
+      [ "$E2E_WINDOWS" != 1 ] || [[ "${sock//\\//}" == "$HOME/.config/herdr/sessions/$name/"* ]] \
+        || fail "session socket '$sock' is outside the scenario's private Herdr registry"
+      [ "$E2E_WINDOWS" = 1 ] || [ "${#sock}" -le 92 ] || fail "session socket path lacks required AF_UNIX margin (${#sock} bytes; max 92)"
       if e2e_process_identity_verify "$_pid" "$identity"; then
         # Re-verify immediately before publishing the socket to the caller.
         printf -v "$sockvar" '%s' "$sock"
@@ -1590,7 +1681,7 @@ e2e_session_ensure() {
 # BOARD_SCOPE_PATH to a deterministic disposable non-Git directory and
 # BOARD_SPAWNER=herdr (real herdr panes). Registers temp-dir removal.
 e2e_isolate() {
-  E2E_TMP="$(mktemp -d /tmp/hb-e2e.XXXXXX)"
+  E2E_TMP="$(mktemp -d "$E2E_TMP_ROOT/hb-e2e.XXXXXX")"
   export BOARD_DB="$E2E_TMP/board.db"
   export BOARD_SOCKET="$E2E_TMP/boardd.sock"
   export HERDR_BOARD_CONFIG="$E2E_TMP/config.toml"
@@ -1600,8 +1691,10 @@ e2e_isolate() {
   # sensitive prompt tempfiles, which are intentionally never individually
   # manifested) inside this exact marker-owned root.
   export TMPDIR="$E2E_TMP"
+  # Windows Rust reads TMP/TEMP instead.
+  [ "$E2E_WINDOWS" != 1 ] || export TMP="$E2E_TMP" TEMP="$E2E_TMP"
   mkdir -p "$BOARD_SCOPE_PATH"
-  BOARD_SCOPE_PATH="$(cd "$BOARD_SCOPE_PATH" && pwd -P)"
+  BOARD_SCOPE_PATH="$(e2e_native_path "$(cd "$BOARD_SCOPE_PATH" && pwd -P)")"
   export BOARD_SCOPE_PATH
   e2e_write_config "$HERDR_BOARD_CONFIG"
   printf 'herdr-board scenario temp\n' >"$E2E_TMP/.disposable"
@@ -1638,16 +1731,17 @@ EOF
 # capture its exact /proc identity in E2E_DAEMON_IDENTITY, register a stop, and
 # wait until it answers.
 e2e_daemon_start() {
-  local i owner_token provisional logical=daemon-provisional command
+  local i owner_token provisional logical=daemon-provisional command argv0
   step "Starting isolated boardd (herdr spawner, foreground)"
   owner_token="$(python3 -c 'import secrets; print(secrets.token_hex(16))')" \
     || fail "cannot generate board-daemon ownership token"
   # Keep the generic provisional token too: it lets the existing manifest token
   # verifier ledger the launcher state, while the daemon-specific variable is
   # the capability used for every transition/full-identity check.
-  E2E_HERDR_OWNER_TOKEN="$owner_token" E2E_BOARD_DAEMON_OWNER_TOKEN="$owner_token" \
-    "$BOARD_BIN" daemon --foreground >"$E2E_TMP/daemon.log" 2>&1 &
+  ( E2E_HERDR_OWNER_TOKEN="$owner_token" E2E_BOARD_DAEMON_OWNER_TOKEN="$owner_token" \
+    exec "$BOARD_BIN" daemon --foreground ) >"$E2E_TMP/daemon.log" 2>&1 &
   E2E_DAEMON_PID=$!
+  argv0="$(e2e_argv0 "$BOARD_BIN")"
   E2E_DAEMON_IDENTITY=""
   provisional=""
   for (( i=0; i<20; i++ )); do
@@ -1664,7 +1758,7 @@ e2e_daemon_start() {
   fi
   E2E_PROVISIONAL_CHILD_ARMED["$logical"]=1
   printf -v command 'e2e_provisional_child_abort %q %q %q %q %q %q %q' \
-    "$logical" "$E2E_DAEMON_PID" "$provisional" "$BOARD_BIN" "" daemon E2E_BOARD_DAEMON_OWNER_TOKEN
+    "$logical" "$E2E_DAEMON_PID" "$provisional" "$argv0" "" daemon E2E_BOARD_DAEMON_OWNER_TOKEN
   e2e_defer "$command"
   e2e_process_resource_register helper "$logical" "$E2E_DAEMON_PID" "$provisional" \
     || fail "cannot ledger provisional board-daemon evidence"
@@ -1672,11 +1766,11 @@ e2e_daemon_start() {
   # Only the same PID/start/parent/owner may transition to this exact daemon argv.
   for (( i=0; i<25; i++ )); do
     E2E_DAEMON_IDENTITY="$(e2e_process_identity_capture "$E2E_DAEMON_PID" daemon --foreground \
-      "$BOARD_BIN" "$owner_token" E2E_BOARD_DAEMON_OWNER_TOKEN "$provisional")" && break
+      "$argv0" "$owner_token" E2E_BOARD_DAEMON_OWNER_TOKEN "$provisional")" && break
     sleep 0.02
   done
   if [ -z "$E2E_DAEMON_IDENTITY" ]; then
-    e2e_provisional_child_abort "$logical" "$E2E_DAEMON_PID" "$provisional" "$BOARD_BIN" "" \
+    e2e_provisional_child_abort "$logical" "$E2E_DAEMON_PID" "$provisional" "$argv0" "" \
       daemon E2E_BOARD_DAEMON_OWNER_TOKEN \
       || fail "refusing unsafe provisional daemon cleanup"
     fail "refusing isolated daemon: could not capture process identity"
@@ -1737,7 +1831,7 @@ e2e_daemon_kill_owned() {
 e2e_scenario_temp_remove_owned() {
   local root="${E2E_TMP:-}"
   [ -e "$root" ] || { e2e_root_resource_release scenario-temp; return 0; }
-  [[ "$root" == /tmp/hb-e2e.* ]] && [ -d "$root" ] \
+  [[ "$root" == "$E2E_TMP_ROOT"/hb-e2e.* ]] && [ -d "$root" ] \
     && e2e_marker_resource_verify root scenario-temp "$root/.disposable" || {
     printf 'E2E FAIL: refusing changed/unowned scenario-temp cleanup: %s\n' "$root" >&2; return 1;
   }
