@@ -33,7 +33,8 @@ case "$(uname -s)" in
     SUITE_SCENARIOS=()
     ;;
 esac
-CACHE_DIR="${HERDR_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/herdr-board/herdr-$HERDR_VERSION-$HERDR_PLATFORM}"HERDR_BIN="$CACHE_DIR/$HERDR_EXE"
+CACHE_DIR="${HERDR_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/herdr-board/herdr-$HERDR_VERSION-$HERDR_PLATFORM}"
+HERDR_BIN="$CACHE_DIR/$HERDR_EXE"
 HERDR_ZIP_MARKER="$CACHE_DIR/.verified-zip.sha256"
 mkdir -p "$CACHE_DIR"
 chmod 700 "$CACHE_DIR"
