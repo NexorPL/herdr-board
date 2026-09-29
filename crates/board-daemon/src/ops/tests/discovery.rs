@@ -1659,6 +1659,37 @@ fn card_create_uses_filtered_default_harness() {
 }
 
 #[test]
+fn card_create_with_explicit_harness_skips_herdr_discovery() {
+    // An explicit harness cannot be changed by discovery, so `card.create`
+    // must not pay for an `integration.list` round-trip (nor fail when Herdr
+    // errors the call). An omitted harness still discovers.
+    let herdr = testkit::herdr_server()
+        .on("integration.list", |req| {
+            testkit::error(req, "internal", "boom")
+        })
+        .serve();
+    let d = test_daemon_with_registry(
+        Config::default(),
+        Some(SessionRegistry::new(herdr.socket.clone())),
+    );
+    let explicit = handle_request(
+        &d,
+        "card.create",
+        json!({"title": "explicit", "harness": "claude"}),
+    )
+    .unwrap();
+    assert_eq!(explicit["harness"], "claude");
+    assert!(
+        !herdr.methods().contains(&"integration.list".to_string()),
+        "an explicit harness must not trigger Herdr discovery"
+    );
+    // Omitted harness discovers through a failing Herdr → graceful pi fallback.
+    let default = handle_request(&d, "card.create", json!({"title": "default"})).unwrap();
+    assert_eq!(default["harness"], "pi");
+    assert!(herdr.methods().contains(&"integration.list".to_string()));
+}
+
+#[test]
 fn harness_capabilities_pi_filtered_to_logged_in_provider() {
     // Models are filtered to the logged-in provider: store has `zai` + `openai`
     // but auth only lists `zai` → only `zai/` models appear. This is the
@@ -1690,7 +1721,11 @@ fn harness_capabilities_pi_filtered_to_logged_in_provider() {
         .iter()
         .map(|m| m["id"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(ids, vec!["zai/glm-5.2"], "only zai provider is authenticated");
+    assert_eq!(
+        ids,
+        vec!["zai/glm-5.2"],
+        "only zai provider is authenticated"
+    );
     assert_eq!(v["model_freeform"], true);
 }
 
@@ -1708,10 +1743,16 @@ fn harness_capabilities_models_fallback_when_login_unreachable() {
     let codex = handle_request(&d, "harness.capabilities", json!({"harness": "codex"})).unwrap();
     assert!(codex["models"].as_array().unwrap().is_empty());
     assert_eq!(codex["model_freeform"], true);
-    let opencode = handle_request(&d, "harness.capabilities", json!({"harness": "opencode"})).unwrap();
+    let opencode =
+        handle_request(&d, "harness.capabilities", json!({"harness": "opencode"})).unwrap();
     // Opencode fallback is defined (nemotron + deepseek), models field always defined.
     assert_eq!(opencode["models"].as_array().unwrap().len(), 2);
-    let agy = handle_request(&d, "harness.capabilities", json!({"harness": "antigravity"})).unwrap();
+    let agy = handle_request(
+        &d,
+        "harness.capabilities",
+        json!({"harness": "antigravity"}),
+    )
+    .unwrap();
     assert!(agy["models"].as_array().unwrap().is_empty());
     assert_eq!(agy["model_freeform"], true);
 }

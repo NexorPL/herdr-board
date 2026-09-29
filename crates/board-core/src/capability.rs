@@ -602,8 +602,14 @@ pub fn available_harnesses(config: &Config) -> Vec<String> {
 /// harness discovery. When `installed_targets` is `None` Herdr was
 /// unreachable and the full builtin list is returned (graceful fallback).
 /// When it is `Some`, only builtins whose Herdr target appears as
-/// `available` are kept; config-defined harnesses are always appended
-/// (they are not Herdr builtins and have no discovery signal).
+/// `available` are kept; genuinely config-defined harnesses are always
+/// appended (they are not Herdr builtins and have no discovery signal).
+///
+/// A `[harness.NAME]` section whose `NAME` is a builtin is deliberately
+/// skipped: [`meta_for`] resolves the builtin adapter first, so the config
+/// definition is unreachable and listing the name would pretend otherwise —
+/// worse, when Herdr marks that builtin uninstalled an append would sneak
+/// the name back into the picker with the builtin's behavior behind it.
 pub fn filtered_available_harnesses(
     config: &Config,
     installed_targets: Option<&[String]>,
@@ -626,7 +632,7 @@ pub fn filtered_available_harnesses(
     let mut config_keys: Vec<String> = config.harness.keys().cloned().collect();
     config_keys.sort();
     for k in config_keys {
-        if !out.contains(&k) {
+        if builtin_harness_target(&k).is_none() && !out.contains(&k) {
             out.push(k);
         }
     }

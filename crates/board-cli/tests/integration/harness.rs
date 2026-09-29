@@ -77,7 +77,6 @@ fn harness_models_default_is_pi() {
     // live-populated. The gate is that the harness is pi, freeform, and
     // offers the full effort ladder.
     assert!(caps.model_freeform);
-    assert!(caps.model_freeform);
     assert!(caps
         .default_efforts
         .iter()

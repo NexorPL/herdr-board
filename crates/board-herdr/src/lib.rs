@@ -49,7 +49,6 @@ pub use params::{
 pub use transport::{default_socket_path, SocketDeadlines};
 pub use types::{
     AgentInfo, AgentSession, AgentStarted, AgentStatus, IntegrationInfo, Layout, LayoutPane,
-    LayoutSplit, NotificationShown, NotificationSound, PaneInfo, PaneReadResult, Pong,
-    ReadSource, Rect, SessionSnapshot, SplitDirection, TabCreated, TabInfo, WorkspaceCreated,
-    WorkspaceInfo,
+    LayoutSplit, NotificationShown, NotificationSound, PaneInfo, PaneReadResult, Pong, ReadSource,
+    Rect, SessionSnapshot, SplitDirection, TabCreated, TabInfo, WorkspaceCreated, WorkspaceInfo,
 };

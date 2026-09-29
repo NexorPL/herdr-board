@@ -442,23 +442,50 @@ fn filtered_harnesses_show_only_installed_builtins() {
 }
 
 #[test]
+fn config_section_under_a_builtin_name_never_readmits_it() {
+    use board_core::capability::{available_harnesses, filtered_available_harnesses};
+    // `[harness.claude]` is unreachable (`meta_for` resolves the builtin first), so
+    // it must never re-add `claude` to a filtered list, and never appear twice in
+    // the unfiltered fallback. A genuinely custom name is still appended.
+    let toml = "[harness.claude]\nargv = [\"x\"]\n[harness.mine]\nargv = [\"m\"]\n";
+    let cfg = Config::from_toml(toml).unwrap();
+    let only_pi = vec!["pi".to_string()];
+    assert_eq!(
+        filtered_available_harnesses(&cfg, Some(&only_pi)),
+        vec!["pi", "mine"],
+        "the uninstalled builtin must stay out even with a colliding config section"
+    );
+    let pi_and_claude = vec!["pi".to_string(), "claude".to_string()];
+    assert_eq!(
+        filtered_available_harnesses(&cfg, Some(&pi_and_claude)),
+        vec!["pi", "claude", "mine"],
+        "the installed builtin appears exactly once"
+    );
+    assert_eq!(
+        available_harnesses(&cfg),
+        vec!["pi", "claude", "codex", "opencode", "antigravity", "mine"],
+        "the unfiltered fallback also keeps one claude entry"
+    );
+}
+
+#[test]
 fn default_harness_picks_pi_or_first_installed() {
     use board_core::capability::default_harness_for;
     // pi present → pi is the default even though other harnesses exist.
     assert_eq!(
-        default_harness_for(&vec!["pi".to_string(), "codex".to_string()]),
+        default_harness_for(&["pi".to_string(), "codex".to_string()]),
         "pi"
     );
     // pi absent → first installed in canonical order.
     assert_eq!(
-        default_harness_for(&vec!["codex".to_string(), "opencode".to_string()]),
+        default_harness_for(&["codex".to_string(), "opencode".to_string()]),
         "codex"
     );
     // Empty list (no builtin installed and no config) → last-resort pi.
     assert_eq!(default_harness_for(&[]), "pi");
     // Config-only list → first config harness.
     assert_eq!(
-        default_harness_for(&vec!["alpha".to_string(), "zeta".to_string()]),
+        default_harness_for(&["alpha".to_string(), "zeta".to_string()]),
         "alpha"
     );
 }

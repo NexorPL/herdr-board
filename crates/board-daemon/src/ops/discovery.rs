@@ -1,7 +1,5 @@
 use super::*;
-use board_core::capability::{
-    available_harnesses, capabilities_for, filtered_available_harnesses,
-};
+use board_core::capability::{available_harnesses, capabilities_for, filtered_available_harnesses};
 use board_core::{agy_catalog, codex_catalog, opencode_catalog, pi_catalog};
 
 /// Try Herdr's `integration.list` to discover which builtin harnesses are
@@ -90,11 +88,9 @@ pub(super) fn harness_capabilities(d: &Arc<Daemon>, p: HarnessCapabilitiesParams
 }
 
 pub(super) fn harness_list(d: &Arc<Daemon>) -> Result<Value> {
-    let harnesses = match installed_targets(d) {
-        Some(targets) => filtered_available_harnesses(&d.config, Some(&targets)),
-        None => available_harnesses(&d.config),
-    };
-    Ok(json!(HarnessListResult { harnesses }))
+    Ok(json!(HarnessListResult {
+        harnesses: effective_harnesses(d)
+    }))
 }
 
 pub(super) fn space_list(d: &Arc<Daemon>, p: SpaceListParams) -> Result<Value> {
