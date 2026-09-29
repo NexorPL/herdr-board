@@ -64,7 +64,7 @@ x=json.loads(sys.argv[1]); expected=int(sys.argv[2])
 assert x["card"]["status"] == "failed"
 assert x["card"]["column_id"] == expected
 matches=[c for c in x["comments"] if c["body"] == "pane exited without board done"]
-assert len(matches) == 1
+assert len(matches) == 1, [c["body"] for c in x["comments"]]
 print("  late stream observed exact pane exit once")
 PY
 $BOARD_BIN daemon status >/dev/null

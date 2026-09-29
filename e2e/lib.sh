@@ -213,6 +213,9 @@ e2e_artifact_invocation_validate() {
 # Windows Herdr keeps its session registry under XDG_CONFIG_HOME (else
 # %APPDATA%), never HOME: point it into the scenario root too. Its config there
 # gives pane shells Git Bash, so pane commands keep the harness's shell syntax.
+# Windows panes get PATH from the registry, not from Herdr, so the private
+# HOME's .bashrc puts the MSYS tools first. (Not `shell_mode = "login"`:
+# Herdr 0.9.0 on Windows then falls back to cmd.exe.)
 e2e_herdr_home_export() {
   [ "$E2E_WINDOWS" = 1 ] || return 0
   export XDG_CONFIG_HOME="$E2E_SCENARIO_ROOT/.config"
@@ -220,6 +223,7 @@ e2e_herdr_home_export() {
   mkdir -p "$XDG_CONFIG_HOME/herdr"
   printf "[terminal]\ndefault_shell = '%s'\n" "$(e2e_argv0 "${E2E_BASH:-$BASH}")" \
     >"$XDG_CONFIG_HOME/herdr/config.toml"
+  printf 'export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"\n' >"$E2E_SCENARIO_ROOT/.bashrc"
 }
 
 e2e_scenario_root_ensure() {
@@ -355,6 +359,8 @@ e2e_resolve_herdr_bin() {
   fi
   if e2e_is_abs "$resolved" && [ -x "$resolved" ]; then
     HERDR_BIN="$(e2e_native_path "$resolved")"
+    # boardd runs `$HERDR_BIN_PATH session list`; hand it the native spelling.
+    [ "$E2E_WINDOWS" != 1 ] || export HERDR_BIN_PATH="$HERDR_BIN"
   fi
   HERDR_BIN_RESOLVED=1
 }
@@ -643,6 +649,9 @@ c=d.get("card",{}); runs=d.get("runs",[]); r=runs[-1] if runs else {}
 p=(r.get("prompt_snapshot") or "").encode(); s=(r.get("system_prompt_snapshot") or "").encode()
 print("card diagnostic: id=%s status=%s column_id=%s run_id=%s outcome=%s prompt_len=%d prompt_sha256=%s system_len=%d system_sha256=%s" %
  (c.get("id"),c.get("status"),c.get("column_id"),r.get("id"),r.get("outcome"),len(p),hashlib.sha256(p).hexdigest(),len(s),hashlib.sha256(s).hexdigest()),file=sys.stderr)
+# Board-authored system comments carry launch/transition failures, never prompts.
+for comment in [x for x in d.get("comments",[]) if x.get("author") == "system"][-3:]:
+    print("card system comment: %s" % comment.get("body"),file=sys.stderr)
 ' || true
 }
 
@@ -1691,8 +1700,9 @@ e2e_isolate() {
   # sensitive prompt tempfiles, which are intentionally never individually
   # manifested) inside this exact marker-owned root.
   export TMPDIR="$E2E_TMP"
-  # Windows Rust reads TMP/TEMP instead.
-  [ "$E2E_WINDOWS" != 1 ] || export TMP="$E2E_TMP" TEMP="$E2E_TMP"
+  # Windows Rust reads TMP/TEMP instead, and its data dir comes from the
+  # profile rather than HOME, so diagnostic logs are pinned here as well.
+  [ "$E2E_WINDOWS" != 1 ] || export TMP="$E2E_TMP" TEMP="$E2E_TMP" BOARD_LOG_DIR="$E2E_TMP/logs"
   mkdir -p "$BOARD_SCOPE_PATH"
   BOARD_SCOPE_PATH="$(e2e_native_path "$(cd "$BOARD_SCOPE_PATH" && pwd -P)")"
   export BOARD_SCOPE_PATH
@@ -1789,7 +1799,9 @@ e2e_daemon_start() {
   done
   "$BOARD_BIN" daemon status >/dev/null 2>&1 || fail "daemon did not come up (see $E2E_TMP/daemon.log)"
   local scope_params opened
-  scope_params="$(python3 -c 'import json,sys; print(json.dumps({"scope_path":sys.argv[1]}))' "$BOARD_SCOPE_PATH")"
+  # board.open keys boards by the exact path; the CLI canonicalizes its scope
+  # (on Windows to `C:\…`), so open the canonical spelling.
+  scope_params="$(python3 -c 'import json,os,sys; print(json.dumps({"scope_path":os.path.realpath(sys.argv[1])}))' "$BOARD_SCOPE_PATH")"
   opened="$(brpc board.open "$scope_params")"
   E2E_BOARD_ID="$(printf '%s' "$opened" | python3 -c 'import json,sys; print(json.load(sys.stdin)["board"]["id"])')"
   export E2E_BOARD_ID

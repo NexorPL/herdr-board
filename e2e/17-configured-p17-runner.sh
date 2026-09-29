@@ -20,7 +20,9 @@ set -euo pipefail
 : "${BOARD_SOCKET:?BOARD_SOCKET required}"
 : "${HERDR_SOCKET_PATH:?HERDR_SOCKET_PATH required}"
 out="$(dirname "$BOARD_SOCKET")/p17-runner-$BOARD_RUN_ID.json"
-python3 - "$out" "$PWD" "$BOARD_CARD_ID" "$BOARD_RUN_ID" "$BOARD_PROMPT" "$BOARD_SYSTEM_PROMPT" "$BOARD_SOCKET" "$HERDR_SOCKET_PATH" "$@" <<'PY'
+# Git Bash's `pwd -W` is the native spelling Windows Python can resolve.
+cwd="$(pwd -W 2>/dev/null || pwd)"
+python3 - "$out" "$cwd" "$BOARD_CARD_ID" "$BOARD_RUN_ID" "$BOARD_PROMPT" "$BOARD_SYSTEM_PROMPT" "$BOARD_SOCKET" "$HERDR_SOCKET_PATH" "$@" <<'PY'
 import json, os, sys
 path, cwd, card_id, run_id, prompt, system, board_socket, herdr_socket, *argv = sys.argv[1:]
 with open(path, "w", encoding="utf-8") as f:

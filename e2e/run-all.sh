@@ -47,6 +47,8 @@ fi
 # Resolve required non-system tools before entering the controlled standard PATH.
 BOARD_BIN="${BOARD_BIN:-$REPO_ROOT/target/release/board}"
 HERDR_BIN_PATH="${HERDR_BIN_PATH:-$(type -P herdr 2>/dev/null || true)}"
+# Windows Herdr (and the Actions tool cache) spell it `C:\…`.
+[ "$E2E_WINDOWS" != 1 ] || [ -z "$HERDR_BIN_PATH" ] || HERDR_BIN_PATH="$(cygpath -u "$HERDR_BIN_PATH")"
 [[ "$HERDR_BIN_PATH" == /* ]] && [ -x "$HERDR_BIN_PATH" ] \
   || { echo 'run-all.sh: herdr must resolve to an absolute executable' >&2; exit 2; }
 E2E_STANDARD_PATH=/usr/local/bin:/usr/bin:/bin
