@@ -17,7 +17,9 @@ Herdr/board — that conflicts with the user's active environment. Follow the
 [`development-workflow` skill](.agents/skills/development-workflow/SKILL.md) for the
 edit-test loop, interactive shell/board CLI/TUI, the explicit opt-in real-provider agent
 mode (pi/codex/antigravity), visual validation through the sandbox, and the handoff
-checklist. Host-side execution is an explicit, documented exception only.
+checklist. Host-side execution is an explicit, documented exception only. The sandbox is
+Linux-only: on Windows, `cargo test` runs on the host (it touches no Herdr), and live E2E runs
+in CI's `live-e2e-windows` job, or on the host only with the user's explicit approval.
 
 ## Workspace layout & crate ownership
 
@@ -158,5 +160,8 @@ differs from 0.9.0; re-verify against `api schema` before changing that gate or 
   workspace, agent, and status fields; `idle ≠ finished`, and a trailing `idle` may follow `done`
   (completion still needs the explicit `board done` channel). Watcher identity is `(session socket,
   pane id)`, not pane id alone.
+- **Windows speaks named pipes.** Herdr and boardd serve `\\.\pipe\` + the socket path (no file
+  exists there); `board-ipc` owns that transport. Pane shells get `PATH` from the registry,
+  not from Herdr's environment. Details: [`docs/herdr.md`](docs/herdr.md#windows).
 - **AF_UNIX paths cap at 108 chars.** Test DBs/sockets must live under a short `/tmp` dir
   (`tempfile::tempdir()`), not a deep nested path, or `connect` fails with a cryptic error.
