@@ -116,7 +116,7 @@ class LiveE2ECIContractTests(unittest.TestCase):
         self.assertIn("shell: bash", job)
         self.assertEqual(
             re.findall(r"^\s*run:\s*(.+)$", job, re.M),
-            ["bash e2e/test-harness.sh", "bash e2e/ci.sh"],
+            ["bash e2e/ci.sh"],
         )
         self.assertIn(HERDR_WINDOWS_SHA256, job)
         self.assertIn("if: always()", job)
@@ -131,9 +131,19 @@ class LiveE2ECIContractTests(unittest.TestCase):
     def test_wrapper_forces_one_fresh_release_build_before_scenarios(self) -> None:
         command = (
             'E2E_FORCE_BUILD=1 "$REPO_ROOT/e2e/run-all.sh" --require-all '
-            '2>&1 | tee "$EXPORT_DIR/suite.log"'
+            '"${SUITE_SCENARIOS[@]}" 2>&1 | tee "$EXPORT_DIR/suite.log"'
         )
         self.assertEqual(self.wrapper.count(command), 1)
+
+    def test_linux_runs_the_whole_catalog_and_windows_a_named_subset(self) -> None:
+        self.assertEqual(
+            re.findall(r"(?m)^\s*SUITE_SCENARIOS=\((.*)\)$", self.wrapper),
+            [
+                "01-core 04-fail-on-fail 06-silent-exit 17-configured-p17-runner "
+                "19-daemon-before-herdr",
+                "",
+            ],
+        )
 
     def test_e2e_preflights_accept_compatible_versions_and_pin_protocol(self) -> None:
         # The standard-suite preflight accepts the reference release and the

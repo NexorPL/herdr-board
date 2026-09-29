@@ -196,10 +196,8 @@ jobs:
           key: herdr-${{ runner.os }}-x86_64-0.9.0-b4508c445de1c1a68c760a01735da2aba2fa214b2aafd4b07f732e49b2a64b11
 
       # `shell: bash` is Git Bash; a bare `bash` under pwsh may resolve to WSL.
-      - name: e2e harness safety checks
-        shell: bash
-        run: bash e2e/test-harness.sh
-
+      # e2e/test-harness.sh stays on the Linux e2e-safety job: its fixtures are
+      # MSYS children, which Windows process identity cannot see.
       - name: Provider-free live E2E
         shell: bash
         env:

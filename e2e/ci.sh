@@ -19,12 +19,18 @@ case "$(uname -s)" in
     HERDR_URL=https://github.com/herdrdev/herdr/releases/download/v0.9.0/herdr-windows-x86_64.zip
     HERDR_SHA256=b4508c445de1c1a68c760a01735da2aba2fa214b2aafd4b07f732e49b2a64b11
     HERDR_EXE=herdr.exe
+    # The Windows live suite runs this subset for now; the rest of the
+    # catalog is a documented follow-up (docs/testing.md).
+    SUITE_SCENARIOS=(01-core 04-fail-on-fail 06-silent-exit 17-configured-p17-runner 19-daemon-before-herdr)
+    # Windows Python installs ship `python`; `python3` may be absent or a stub.
+    python3 -c '' >/dev/null 2>&1 || python3() { python "$@"; }
     ;;
   *)
     HERDR_PLATFORM=linux-x86_64
     HERDR_URL=https://github.com/herdrdev/herdr/releases/download/v0.9.0/herdr-linux-x86_64
     HERDR_SHA256=4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f
     HERDR_EXE=herdr
+    SUITE_SCENARIOS=()
     ;;
 esac
 CACHE_DIR="${HERDR_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/herdr-board/herdr-$HERDR_VERSION-$HERDR_PLATFORM}"
@@ -80,13 +86,13 @@ echo "Pinned Herdr SHA-256: $HERDR_SHA256"
 
 export HERDR_BIN_PATH="$HERDR_BIN"
 set +e
-E2E_FORCE_BUILD=1 "$REPO_ROOT/e2e/run-all.sh" --require-all 2>&1 | tee "$EXPORT_DIR/suite.log"
+E2E_FORCE_BUILD=1 "$REPO_ROOT/e2e/run-all.sh" --require-all "${SUITE_SCENARIOS[@]}" 2>&1 | tee "$EXPORT_DIR/suite.log"
 suite_status=${PIPESTATUS[0]}
 set -e
 printf '%s\n' "$suite_status" >"$EXPORT_DIR/suite.status"
 
 mapfile -t artifact_roots < <(
-  awk '/^  artifacts: \/tmp\/hb-e2e-run\.[[:alnum:]]{6}$/ { print $2 }' \
+  awk '/^  artifacts: (\/tmp|[A-Za-z]:\/[^ ]*)\/hb-e2e-run\.[[:alnum:]]{6}$/ { print $2 }' \
     "$EXPORT_DIR/suite.log"
 )
 export_status=0
