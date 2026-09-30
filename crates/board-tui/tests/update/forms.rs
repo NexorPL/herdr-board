@@ -215,6 +215,41 @@ fn new_card_defaults_to_pi_and_lists_both_builtins() {
 }
 
 #[test]
+fn new_card_reconciles_capabilities_to_the_filtered_default() {
+    // Only codex is installed. Opening New Card must both switch the form to
+    // the filtered default and fetch that harness's capabilities: the
+    // pre-filter `pi` catalog must never back codex's model/effort/permission
+    // fields (the regression from review finding 1).
+    let client = CodexClient::new(demo_client().unwrap().with_harnesses(["codex"]));
+    let mut d = driver_of(client);
+    d.handle(key(KeyCode::Char('n')));
+    let form = d.app.form.as_ref().unwrap();
+    assert_eq!(form.current_harness(), "codex");
+    let caps = form.caps.as_ref().expect("capabilities fetched");
+    assert_eq!(
+        caps.harness, "codex",
+        "capabilities must match the reconciled harness"
+    );
+    // Codex's own permission vocabulary proves the fields were rebuilt from
+    // the codex catalog (Pi has no permission modes at all).
+    assert_eq!(
+        opt_labels(form, FieldId::Permission),
+        vec![
+            "default permission",
+            "Ask for approval",
+            "Approve for me",
+            "Full access"
+        ]
+    );
+    let perm = form
+        .fields
+        .iter()
+        .position(|f| f.id == FieldId::Permission)
+        .unwrap();
+    assert!(form.field_visible(perm));
+}
+
+#[test]
 fn opening_column_form_loads_only_column_metadata() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let mut d = driver_of(RecordingClient {
@@ -243,7 +278,7 @@ fn opening_column_form_loads_only_column_metadata() {
             && form.field_visible(form.fields.iter().position(|f| f.id == field.id).unwrap())));
     assert_eq!(
         *calls.lock().unwrap(),
-        vec!["harness.capabilities", "harness.list"]
+        vec!["harness.list", "harness.capabilities"]
     );
 
     // Edit follows the same metadata path; a newly opened form starts at Name.
@@ -255,7 +290,7 @@ fn opening_column_form_loads_only_column_metadata() {
     assert_eq!(form.fields[form.focus].id, FieldId::Name);
     assert_eq!(
         *calls.lock().unwrap(),
-        vec!["harness.capabilities", "harness.list"]
+        vec!["harness.list", "harness.capabilities"]
     );
 }
 

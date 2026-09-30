@@ -201,6 +201,25 @@ impl Form {
         }
     }
 
+    /// The harness a create form treats as selected once the (possibly
+    /// filtered) installed list is known: the current selection when the list
+    /// is unknown or contains it, otherwise the filtered default (`pi` when
+    /// installed, else the first installed harness). Edit and column forms
+    /// keep their stored harness even when it is not installed — only a new
+    /// card may be re-homed. The loader uses this to fetch capabilities for
+    /// the harness whose selectors will actually be built.
+    pub fn reconciled_harness(&self, harnesses: Option<&[String]>) -> String {
+        let current = self.current_harness();
+        let Some(list) = harnesses else {
+            return current;
+        };
+        if matches!(self.kind, FormKind::CardCreate { .. }) && !list.contains(&current) {
+            board_core::capability::default_harness_for(list)
+        } else {
+            current
+        }
+    }
+
     fn rebuild_fields(&mut self) {
         if self.is_card_form() {
             self.rebuild_card_fields();
@@ -213,7 +232,13 @@ impl Form {
         if !self.is_card_form() {
             return;
         }
-        let values = self.card_values();
+        let mut values = self.card_values();
+        // For a new card, the guided selectors follow the reconciled harness:
+        // a filtered list may exclude `pi`. Edits preserve the card's existing
+        // harness even when that harness is not installed.
+        if matches!(self.kind, FormKind::CardCreate { .. }) {
+            values.harness = self.reconciled_harness(Some(&self.harnesses));
+        }
         self.fields = build_card_fields(
             &values,
             self.caps.as_ref(),

@@ -550,6 +550,36 @@ pub fn meta_for(harness: &str, config: &Config) -> Option<Box<dyn HarnessMeta>> 
     }
 }
 
+/// Mapping from board builtin harness name to the Herdr integration
+/// target that proves it is installed. `antigravity` is served by the
+/// `antigravity_cli` target (command `agy`). This is the single place the
+/// Herdr-to-board name translation lives.
+pub const HARNESS_INTEGRATION_TARGETS: &[(&str, &str)] = &[
+    ("pi", "pi"),
+    ("claude", "claude"),
+    ("codex", "codex"),
+    ("opencode", "opencode"),
+    ("antigravity", "antigravity_cli"),
+];
+
+/// The Herdr integration target for a builtin board harness, if it is a
+/// builtin.
+pub fn builtin_harness_target(harness: &str) -> Option<&'static str> {
+    HARNESS_INTEGRATION_TARGETS
+        .iter()
+        .find(|(h, _)| *h == harness)
+        .map(|(_, target)| *target)
+}
+
+/// Inverse: the board harness for a Herdr integration target, if it is one
+/// of the 5 builtins the board exposes.
+pub fn harness_for_integration_target(target: &str) -> Option<&'static str> {
+    HARNESS_INTEGRATION_TARGETS
+        .iter()
+        .find(|(_, t)| *t == target)
+        .map(|(h, _)| *h)
+}
+
 /// Every harness the daemon knows about: built-ins (`pi`, `claude`, `codex`,
 /// `opencode`) in their declared/default order (pi is the card default, so it
 /// stays first) followed by every config-defined `[harness.NAME]` sorted,
@@ -566,6 +596,63 @@ pub fn available_harnesses(config: &Config) -> Vec<String> {
         }
     }
     out
+}
+
+/// Like [`available_harnesses`] but filtered through Herdr's installed-
+/// harness discovery. When `installed_targets` is `None` Herdr was
+/// unreachable and the full builtin list is returned (graceful fallback).
+/// When it is `Some`, only builtins whose Herdr target appears as
+/// `available` are kept; genuinely config-defined harnesses are always
+/// appended (they are not Herdr builtins and have no discovery signal).
+///
+/// A `[harness.NAME]` section whose `NAME` is a builtin is deliberately
+/// skipped: [`meta_for`] resolves the builtin adapter first, so the config
+/// definition is unreachable and listing the name would pretend otherwise —
+/// worse, when Herdr marks that builtin uninstalled an append would sneak
+/// the name back into the picker with the builtin's behavior behind it.
+pub fn filtered_available_harnesses(
+    config: &Config,
+    installed_targets: Option<&[String]>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    match installed_targets {
+        None => {
+            out.extend(BUILTIN_HARNESSES.iter().map(|s| s.to_string()));
+        }
+        Some(targets) => {
+            for h in BUILTIN_HARNESSES.iter() {
+                if let Some(target) = builtin_harness_target(h) {
+                    if targets.iter().any(|t| t == target) {
+                        out.push(h.to_string());
+                    }
+                }
+            }
+        }
+    }
+    let mut config_keys: Vec<String> = config.harness.keys().cloned().collect();
+    config_keys.sort();
+    for k in config_keys {
+        if builtin_harness_target(&k).is_none() && !out.contains(&k) {
+            out.push(k);
+        }
+    }
+    out
+}
+
+/// The default harness for a filtered list: `pi` when it is installed,
+/// otherwise the first installed harness, otherwise `pi` as a last resort.
+/// This is what a new card should default to when `harness` is omitted.
+pub fn default_harness_for(installed_harnesses: &[String]) -> String {
+    if installed_harnesses
+        .iter()
+        .any(|h| h == crate::harness::DEFAULT_HARNESS)
+    {
+        crate::harness::DEFAULT_HARNESS.to_string()
+    } else if let Some(first) = installed_harnesses.first() {
+        first.clone()
+    } else {
+        crate::harness::DEFAULT_HARNESS.to_string()
+    }
 }
 
 // ---------------------------------------------------------------------------
