@@ -117,7 +117,7 @@ fn script_header(path: &Path) -> String {
 #[cfg(windows)]
 fn script_header(path: &Path) -> String {
     format!(
-        "Remove-Item -LiteralPath {} ",
+        "\u{FEFF}Remove-Item -LiteralPath {} ",
         super::herdr::ps_quote(&path.to_string_lossy())
     )
 }

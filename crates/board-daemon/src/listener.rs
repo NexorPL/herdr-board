@@ -31,9 +31,10 @@ impl Listener {
         Self { inner }
     }
 
-    /// `first_pipe_instance` makes a squatted or duplicate name a startup error;
-    /// the default DACL grants write access to this user, SYSTEM and
-    /// Administrators only — the named-pipe equivalent of a 0600 socket.
+    /// `first_pipe_instance` makes a squatted or duplicate name a startup error.
+    /// The default DACL grants this user, SYSTEM and Administrators full access
+    /// but also gives Everyone (and Anonymous) read; a request needs write, so
+    /// only this user, SYSTEM or an administrator can talk to boardd.
     #[cfg(windows)]
     pub(crate) fn bind(path: &Path) -> io::Result<Self> {
         use tokio::net::windows::named_pipe::ServerOptions;

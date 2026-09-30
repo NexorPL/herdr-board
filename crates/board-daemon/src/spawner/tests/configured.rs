@@ -521,13 +521,26 @@ fn windows_script_removes_itself_runs_argv_and_reports_exit() {
     );
     assert_eq!(
         script,
-        "Remove-Item -LiteralPath 'C:\\Users\\Jan K\\AppData\\Local\\Temp\\herdr-board-run-1.ps1' -Force -ErrorAction SilentlyContinue\n\
+        "\u{FEFF}Remove-Item -LiteralPath 'C:\\Users\\Jan K\\AppData\\Local\\Temp\\herdr-board-run-1.ps1' -Force -ErrorAction SilentlyContinue\n\
          $childStatus = 1\n\
          try { & 'my tool' '--flag=it''s'; $childStatus = $LASTEXITCODE } catch { Write-Error $_ }\n\
          if ($null -eq $childStatus) { $childStatus = 0 }\n\
          if ($env:BOARD_BIN) { & $env:BOARD_BIN __pane-exited --run-id $env:BOARD_RUN_ID }\n\
          exit $childStatus\n"
     );
+}
+
+/// Windows PowerShell 5.1 reads a BOM-less .ps1 in the ANSI code page, which
+/// would mangle non-ASCII argv and the self-delete path.
+#[cfg(windows)]
+#[test]
+fn windows_script_starts_with_a_utf8_bom() {
+    use crate::spawner::herdr::configured_script;
+    let script = configured_script(
+        std::path::Path::new(r"C:\Users\Łukasz\x.ps1"),
+        &["zażółć".to_string()],
+    );
+    assert!(script.as_bytes().starts_with(&[0xEF, 0xBB, 0xBF]));
 }
 
 #[cfg(windows)]

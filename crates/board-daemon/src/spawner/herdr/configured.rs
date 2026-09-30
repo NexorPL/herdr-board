@@ -149,11 +149,13 @@ pub(crate) fn runner_argv(pane_id: &str, script: &Path) -> Vec<String> {
     vec!["pane".into(), "run".into(), pane_id.into(), command]
 }
 
+/// Starts with a UTF-8 BOM: Windows PowerShell 5.1 reads a BOM-less .ps1 in
+/// the ANSI code page, mangling non-ASCII argv and the self-delete path.
 #[cfg(windows)]
 pub(crate) fn configured_script(path: &Path, argv: &[String]) -> String {
     let quoted: Vec<String> = argv.iter().map(|arg| ps_quote(arg)).collect();
     format!(
-        "Remove-Item -LiteralPath {} -Force -ErrorAction SilentlyContinue\n\
+        "\u{FEFF}Remove-Item -LiteralPath {} -Force -ErrorAction SilentlyContinue\n\
          $childStatus = 1\n\
          try {{ & {}; $childStatus = $LASTEXITCODE }} catch {{ Write-Error $_ }}\n\
          if ($null -eq $childStatus) {{ $childStatus = 0 }}\n\
