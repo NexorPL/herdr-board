@@ -328,14 +328,14 @@ pub fn load_from_cli_bounded(opencode_bin: &str, timeout: Duration) -> Option<Ve
     let deadline = Instant::now() + timeout;
     let stdout = match rx.recv_timeout(timeout) {
         Ok(Some(buffer)) => buffer,
-        // Timeout, oversized output, or read failure: kill the child so its
-        // pipe closes, reap it, and join the reader. The channel is dropped
-        // first so a reader blocked on a final send cannot hang the join.
+        // Timeout, oversized output, or read failure: kill and reap the
+        // child. The reader is deliberately not joined: a grandchild (e.g.
+        // node under an npm `.cmd` shim) can hold the pipe open past the
+        // kill, and it must not extend this deadline. The reader ends on
+        // its own once the pipe closes.
         Ok(None) | Err(_) => {
             let _ = child.kill();
             let _ = child.wait();
-            drop(rx);
-            let _ = reader.join();
             return None;
         }
     };
