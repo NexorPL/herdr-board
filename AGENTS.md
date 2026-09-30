@@ -26,6 +26,7 @@ in CI's `live-e2e-windows` job, or on the host only with the user's explicit app
 | Crate | Owns | Never leaks into |
 |---|---|---|
 | `board-core` | models, `board-core::protocol` types, SQLite db + migrations, the pure column engine, prompt assembly, harness adapters, config, the blocking boardd client | herdr/tokio/ratatui specifics |
+| `board-ipc` | platform local IPC (AF_UNIX / Windows named pipes at `\\.\pipe\` + socket path) and `spawn_detached`; all Win32 `unsafe` | board or Herdr semantics |
 | `board-herdr` | the Herdr unix-socket client (envelope, typed workspace/tab/agent/pane/notification/session calls, event stream) | board state; no worktree API |
 | `board-tui` | the ratatui app (`run()` entry), forms, snapshot tests | daemon logic |
 | `board-daemon` | boardd server: run queue, dispatch, per-session herdr clients, watchers, spawner | — |
