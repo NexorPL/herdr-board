@@ -18,14 +18,17 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, InitializeProcThreadAttributeList,
-    UpdateProcThreadAttribute, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS,
+    UpdateProcThreadAttribute, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW,
     EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
     PROC_THREAD_ATTRIBUTE_HANDLE_LIST, STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
 
-/// Spawn `exe args…` with no console, in its own process group, stdin/stdout on
-/// NUL and stderr on `stderr`. Returns the child's PID. `args` are plain tokens
-/// (no quoting is applied beyond the executable path).
+/// Spawn `exe args…` with a windowless console, in its own process group,
+/// stdin/stdout on NUL and stderr on `stderr`. Returns the child's PID. `args`
+/// are plain tokens (no quoting is applied beyond the executable path).
+///
+/// `CREATE_NO_WINDOW`, not `DETACHED_PROCESS`: console programs the daemon
+/// later runs inherit this hidden console instead of each popping a window.
 pub fn spawn_detached(exe: &Path, args: &[&str], stderr: File) -> io::Result<u32> {
     let nul_in = OpenOptions::new().read(true).open("NUL")?;
     let nul_out = OpenOptions::new().write(true).open("NUL")?;
@@ -87,7 +90,7 @@ pub fn spawn_detached(exe: &Path, args: &[&str], stderr: File) -> io::Result<u32
                 std::ptr::null(),
                 std::ptr::null(),
                 1,
-                EXTENDED_STARTUPINFO_PRESENT | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
                 std::ptr::null(),
                 std::ptr::null(),
                 &startup.StartupInfo,
