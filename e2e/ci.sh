@@ -14,10 +14,12 @@ HERDR_PROTOCOL=22
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     # Git Bash on Windows: the release ships a zip; its SHA pins the archive,
-    # and a marker written after a verified extract pins the cached herdr.exe.
+    # a marker written after a verified extract pins the extracted tree
+    # (conpty/ ships beside herdr.exe), and herdr.exe is re-hashed every run.
     HERDR_PLATFORM=windows-x86_64
     HERDR_URL=https://github.com/herdrdev/herdr/releases/download/v0.9.0/herdr-windows-x86_64.zip
     HERDR_SHA256=b4508c445de1c1a68c760a01735da2aba2fa214b2aafd4b07f732e49b2a64b11
+    HERDR_EXE_SHA256=9b3bf49f94c2d09b1d62e11171b132865768dafc36b1327fb946c0cef9ca0d00
     HERDR_EXE=herdr.exe
     # The Windows live suite runs this subset for now; the rest of the
     # catalog is a documented follow-up (docs/testing.md).
@@ -29,6 +31,7 @@ case "$(uname -s)" in
     HERDR_PLATFORM=linux-x86_64
     HERDR_URL=https://github.com/herdrdev/herdr/releases/download/v0.9.0/herdr-linux-x86_64
     HERDR_SHA256=4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f
+    HERDR_EXE_SHA256=$HERDR_SHA256
     HERDR_EXE=herdr
     SUITE_SCENARIOS=()
     ;;
@@ -42,10 +45,9 @@ chmod 700 "$CACHE_DIR"
 sha_matches() {
   [ -f "$1" ] && [ ! -L "$1" ] || return 1
   if [ "$HERDR_EXE" = herdr.exe ]; then
-    [ -f "$HERDR_ZIP_MARKER" ] && [ "$(cat "$HERDR_ZIP_MARKER")" = "$HERDR_SHA256" ]
-  else
-    printf '%s  %s\n' "$HERDR_SHA256" "$1" | sha256sum --check --status
+    [ -f "$HERDR_ZIP_MARKER" ] && [ "$(cat "$HERDR_ZIP_MARKER")" = "$HERDR_SHA256" ] || return 1
   fi
+  printf '%s  %s\n' "$HERDR_EXE_SHA256" "$1" | sha256sum --check --status
 }
 
 if [ ! -x "$HERDR_BIN" ] || ! sha_matches "$HERDR_BIN"; then

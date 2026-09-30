@@ -16,6 +16,8 @@ HERDR_URL = (
     f"v{HERDR_VERSION}/herdr-linux-x86_64"
 )
 HERDR_WINDOWS_SHA256 = "b4508c445de1c1a68c760a01735da2aba2fa214b2aafd4b07f732e49b2a64b11"
+# herdr.exe inside the pinned zip, re-verified on every run like the Linux binary.
+HERDR_WINDOWS_EXE_SHA256 = "9b3bf49f94c2d09b1d62e11171b132865768dafc36b1327fb946c0cef9ca0d00"
 HERDR_WINDOWS_URL = (
     "https://github.com/herdrdev/herdr/releases/download/"
     f"v{HERDR_VERSION}/herdr-windows-x86_64.zip"
@@ -105,6 +107,14 @@ class LiveE2ECIContractTests(unittest.TestCase):
         self.assertIn(HERDR_WINDOWS_URL, self.wrapper)
         self.assertIn(HERDR_WINDOWS_SHA256, self.wrapper)
         self.assertIn("MINGW*", self.wrapper)
+
+    def test_wrapper_rehashes_the_cached_windows_exe(self) -> None:
+        self.assertIn(f"HERDR_EXE_SHA256={HERDR_WINDOWS_EXE_SHA256}", self.wrapper)
+        sha_matches = self.wrapper.split("sha_matches() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn(
+            r"""printf '%s  %s\n' "$HERDR_EXE_SHA256" "$1" | sha256sum --check --status""",
+            sha_matches,
+        )
 
     def test_windows_live_job_runs_the_same_wrappers_on_windows(self) -> None:
         self.assertIn("  live-e2e-windows:", self.workflow)

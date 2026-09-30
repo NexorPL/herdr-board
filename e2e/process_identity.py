@@ -700,9 +700,6 @@ def main() -> int:
         if command == "mode":
             print(private_mode(sys.argv[2]) if PLATFORM == "windows" else f"{stat.S_IMODE(os.stat(sys.argv[2]).st_mode):o}")
             return 0
-        if command == "realpath":
-            print(os.path.realpath(sys.argv[2]))
-            return 0
         if command == "exists":
             return 0 if process_exists(int(sys.argv[2])) else 1
         if command == "state":
