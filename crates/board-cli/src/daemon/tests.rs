@@ -118,6 +118,22 @@ fn stop_reports_not_running_when_no_pipe_exists() {
     ));
 }
 
+/// A pipe that still exists but refuses this connect (every instance busy,
+/// or another user's server) must not be reported as stopped.
+#[cfg(windows)]
+#[test]
+fn stop_fails_closed_when_the_pipe_exists_but_connect_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("boardd.sock");
+    // Never accepts, so the one held client leaves every instance busy.
+    let _listener = board_ipc::Listener::bind(&path).unwrap();
+    let _held = board_ipc::Stream::connect(&path).unwrap();
+    assert!(matches!(
+        super::check_listener_after_connect_failure(&path, super::file_identity(&path)),
+        super::ListenerCheck::Live
+    ));
+}
+
 #[cfg(windows)]
 #[test]
 fn bootstrap_log_is_truncated_per_start() {

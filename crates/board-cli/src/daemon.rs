@@ -135,13 +135,15 @@ fn file_identity(_path: &Path) -> Option<FileIdentity> {
     None
 }
 
-/// Windows: a failed connect already means the listener is gone.
+/// Windows: the listener is gone only when the pipe no longer exists. A pipe
+/// that exists but refuses the connect (every instance busy, another user's
+/// server) fails closed as still live.
 #[cfg(windows)]
 fn check_listener_after_connect_failure(
     path: &Path,
     _original: Option<FileIdentity>,
 ) -> ListenerCheck {
-    if UnixClient::connect(path).is_ok() {
+    if UnixClient::connect(path).is_ok() || board_ipc::endpoint_exists(path) {
         ListenerCheck::Live
     } else {
         ListenerCheck::Gone
