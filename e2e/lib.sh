@@ -1255,12 +1255,16 @@ e2e_proxy_start() {
 
 e2e_proxy_command() {
   local command="$1"
+  shift
   e2e_process_identity_verify "${E2E_OWNED_PROCESS_PIDS[herdr-proxy]:-}" \
     "${E2E_OWNED_PROCESS_IDENTITIES[herdr-proxy]:-}" \
     || fail "refusing proxy control: identity changed"
-  python3 - "$E2E_PROXY_CONTROL" "$command" <<'PY'
+  python3 - "$E2E_PROXY_CONTROL" "$command" "$@" <<'PY'
 import json,socket,sys
-request=json.dumps({"command":sys.argv[2]}).encode()+b"\n"
+request={"command":sys.argv[2]}
+if len(sys.argv) > 3:
+    request["targets"]=",".join(sys.argv[3:])
+request=json.dumps(request).encode()+b"\n"
 if sys.platform == "win32":
     with open(r"\\.\pipe" + "\\" + sys.argv[1], "r+b", buffering=0) as pipe:
         pipe.write(request); buffer=b""

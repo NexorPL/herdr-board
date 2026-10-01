@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- [#132](https://github.com/nelsonPires5/herdr-board/pull/132) feat: Offer only Herdr-installed harnesses in the card and column pickers, defaulting new cards to an installed harness (issue #111).
+
 ## [0.18.0] - 2026-09-23
 
 ### Fixed
